@@ -1,0 +1,13 @@
+[package]
+name = "agentdeck-s8"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+axum = "0.8.9"
+http = "1.5.0"
+rmcp = { version = "3.6", features = ["server", "macros", "transport-streamable-http-server"] }
+schemars = "1.2.3"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+tokio = { version = "1.54.0", features = ["full"] }

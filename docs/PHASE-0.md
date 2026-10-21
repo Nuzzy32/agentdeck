@@ -82,7 +82,7 @@ Codex memancarkan OSC 7501 tanpa query (terlihat di S1). Yang belum terlihat: `b
 ## S7 — Layar headless dengan `vt100`
 **Pertanyaan:** apakah `vt100` membaca layar kedua TUI dengan benar?
 
-Proyek Rust sekali pakai di luar repo:
+Sumber tersimpan di `spikes/s7-screen/`. Awalnya proyek Rust sekali pakai di luar repo:
 ```bash
 cargo new --bin /tmp/agentdeck-s7 && cd /tmp/agentdeck-s7 && cargo add vt100@0.18
 ```
@@ -113,7 +113,8 @@ dengan `--duration` yang cukup panjang dan perhatikan bahwa keluarnya agen bisa 
 ## S8 — Server MCP `rmcp` + axum
 **Pertanyaan:** bisakah server Rust kecil mengenali pane dari token dan dipanggil oleh kedua agen?
 
-Proyek sekali pakai `/tmp/agentdeck-s8` dengan `rmcp` (fitur `server`, `macros`, `transport-streamable-http-server`),
+Sumber spike tersimpan di `spikes/s8-mcp/` (bangun dengan `cargo build --manifest-path spikes/s8-mcp/Cargo.toml`).
+Awalnya proyek sekali pakai `/tmp/agentdeck-s8` dengan `rmcp` (fitur `server`, `macros`, `transport-streamable-http-server`),
 `axum`, `tokio`. Mulai dari contoh resmi di repo `modelcontextprotocol/rust-sdk`: `examples/servers/src/counter_streamhttp.rs`
 dan `simple_auth_streamhttp.rs`. Kebutuhan minimum:
 - bind `127.0.0.1:0`, cetak port;
@@ -146,14 +147,16 @@ nilai literal di JSON dan catat (cadangan di ARCHITECTURE §4).
 ```bash
 export AGENTDECK_TOKEN=tok-b
 shasum ~/.codex/config.toml > spikes/out/s3-before.txt
-codex -c 'mcp_servers.agentdeck={url="http://127.0.0.1:PORT/mcp",bearer_token_env_var="AGENTDECK_TOKEN",default_tools_approval_mode="approve"}'
+codex -c 'mcp_servers.agentdeck.url="http://127.0.0.1:PORT/mcp"' \
+  -c 'mcp_servers.agentdeck.bearer_token_env_var="AGENTDECK_TOKEN"' \
+  -c 'mcp_servers.agentdeck.default_tools_approval_mode="approve"'
 ```
 Di dalam Codex: `/mcp` (harus terdaftar), lalu minta "call the whoami tool". Keluar, lalu
 `grep -n agentdeck ~/.codex/config.toml || echo "no agentdeck entry"`. (Codex boleh menulis hal lain ke config, mis.
 status kepercayaan folder; yang dicek hanya tidak ada entri agentdeck.)
 
-**Lulus:** `whoami` → `p2` tanpa prompt; `no agentdeck entry`. Bila bentuk inline table ditolak, coba kunci per baris:
-`-c mcp_servers.agentdeck.url="..." -c mcp_servers.agentdeck.bearer_token_env_var="AGENTDECK_TOKEN"`.
+**Lulus:** `whoami` → `p2` tanpa prompt; `no agentdeck entry`. Hasil: lulus (D-017). Bila layar akhir berisi
+"Selected model is at capacity", percobaan tidak sah; ulangi atau pilih model lain dengan `-m` (khusus spike).
 
 ## S6 — Throughput PTY lewat Tauri Channel
 Butuh proyek Tauri dari `docs/SETUP.md` §2. Spike di branch `spike/s6`, dibuang setelah dicatat:

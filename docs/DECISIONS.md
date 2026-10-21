@@ -45,9 +45,9 @@ menampilkan kuota yang diambil dari kredensial.
   lokal yang menjalankan CLI milik pengguna memerlukan Commercial Terms. Untuk pemakaian pribadi tidak ada larangan
   yang ditemukan.
 
-## D-007 — Status dari sinyal agen sendiri (2026-10-21; Claude terbukti di S4, Codex sebagian di S5, lihat D-016)
-Urutan: escape dari agen (Claude OSC 7501, Codex OSC 9 lewat `tui.notification_method="osc9"`), lalu hook (Claude
-lewat `--settings`), lalu heuristik output. Hook Codex tidak dipakai karena butuh kepercayaan lewat `/hooks` atau
+## D-007 — Status dari sinyal agen sendiri (2026-10-21; terbukti di S4/S5, D-016, D-017)
+Urutan: OSC 7501 dari agen (Claude setelah query dijawab, Codex tanpa query), lalu heuristik output. Hook Claude lewat
+`--settings` dan OSC 9 Codex hanya cadangan bila protokol berubah. Hook Codex tidak dipakai karena butuh kepercayaan lewat `/hooks` atau
 `--dangerously-bypass-hook-trust`. Membaca layar tidak dipakai untuk status karena rapuh terhadap perubahan TUI.
 
 ## D-008 — Tool agentdeck tidak ditanyakan ulang oleh agen (2026-10-21)
@@ -132,3 +132,33 @@ Dampak ke desain: `status.rs` membaca OSC 7501 untuk kedua agen dan `screen.rs`/
 agen: didekode dengan batas spesifikasi dan hanya ditampilkan, tidak pernah dieksekusi. Konfigurasi
 `tui.notification*` untuk Codex ditahan sebagai cadangan sampai S5 tuntas.
 Bukti: `spikes/out/s4-*.bin`, `spikes/out/s5-*.bin` (tidak di-commit).
+
+## D-017 — Phase 0 S8, S2, S3, S5: server MCP, injeksi per peluncuran, status Codex (2026-10-21)
+Versi: Claude Code 2.1.303, Codex 0.163.0, `rmcp` 3.6.0, `axum` 0.8.9. Sumber: `spikes/s8-mcp/`.
+- **S8 lulus.** Server `rmcp` (`StreamableHttpService` + `LocalSessionManager`) di `127.0.0.1:0`, middleware axum:
+  `Origin` ada → 403, token tidak ada/salah → 401, token sah → `PaneId` dimasukkan ke extensions request dan dibaca tool
+  lewat `Extension<http::request::Parts>`. `Host` asing → 403 dari `allowed_hosts` bawaan rmcp. `instructions` terbaca
+  kedua agen. Catatan rmcp: `allowed_origins` kosong berarti Origin **tidak** divalidasi (bawaan), jadi penolakan
+  Origin dilakukan middleware kita (atau `enforce_origin_validation()`).
+- **Versi protokol:** Claude bernegosiasi `2026-07-28` (stateless, SEP-2567), Codex `2025-06-18` (sesi lama,
+  `Mcp-Session-Id`). Identitas dari token bekerja di keduanya; server wajib melayani dua mode (bawaan rmcp
+  `legacy_session_mode: true` melakukannya).
+- **S2 lulus.** `claude --mcp-config '{"mcpServers":{"agentdeck":{"type":"http","url":"${AGENTDECK_MCP_URL}",
+  "headers":{"Authorization":"Bearer ${AGENTDECK_TOKEN}"}}}}' --allowedTools mcp__agentdeck`: `${VAR}` diekspansi dari
+  env anak, `whoami` → p1 tanpa prompt, bagian `mcpServers` di `~/.claude.json` sama sebelum/sesudah. Cadangan nilai
+  literal tidak diperlukan.
+- **S3 lulus** dengan kunci per baris (`-c mcp_servers.agentdeck.url=…`, `.bearer_token_env_var=…`,
+  `.default_tools_approval_mode="approve"`): `whoami` → p2 tanpa prompt, `~/.codex/config.toml` tidak berubah
+  (shasum sama). Inline table juga tersambung ke server, tetapi turn-nya tidak pernah selesai karena galat server;
+  kunci per baris dipakai karena itulah yang terbukti ujung ke ujung. Thread pembuat judul Codex mencatat
+  `invalid transport in mcp_servers.agentdeck` (DEBUG) untuk kedua bentuk; sesi utama tidak terpengaruh.
+- **S5 lulus.** Dengan `-s read-only -a on-request` (khusus spike) Codex memancarkan `state=blocked:app=codex` saat
+  meminta izin (tanpa `kind`/`msg`); berkas tidak dibuat. `tui.notification*` tidak diperlukan.
+- **Gangguan server OpenAI:** banyak percobaan Codex gagal "Selected model is at capacity" (log Codex:
+  `run_turn: Turn error`), juga untuk tugas latar Codex yang tidak memakai MCP. Percobaan sah memakai `-m gpt-6-luna`
+  (S5) dan `-m gpt-5.6-luna` (S3). Dampak ke desain: header pane perlu menampilkan bahwa agen kembali `idle` setelah
+  galat; `pane_send` ke pane yang baru gagal tetap dikirim (agen sendiri yang melapor).
+- **Temuan untuk `pane_read`:** Claude menampilkan saran prompt berikutnya sebagai teks samar di kotak input (mis.
+  "catat hasil spike ini di PHASE-0.md"); `vt100` membacanya sebagai teks biasa. `pane_read` tidak boleh
+  menganggapnya ketikan orang.
+Bukti: `spikes/out/s2-*`, `s3-*`, `s5-*` (tidak di-commit), log server di `/tmp/agentdeck-s8/err.log`.

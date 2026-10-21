@@ -104,26 +104,26 @@ claude --mcp-config '{"mcpServers":{"agentdeck":{"type":"http","url":"${AGENTDEC
   MCP milik pengguna tetap termuat.
 - `--allowedTools mcp__agentdeck` mengizinkan semua tool agentdeck tanpa prompt, karena gerbangnya ada di agentdeck
   (D-008). Izin lain (edit berkas, Bash) tetap ditanyakan Claude seperti biasa; tidak ada `--permission-mode`.
-- **[Phase 0]** Ekspansi `${VAR}` terdokumentasi untuk `.mcp.json`, belum untuk `--mcp-config`; bentuk pembungkus
-  `mcpServers` juga belum dipastikan. Cadangan: tulis nilai literal di argumen JSON (terlihat oleh `ps` milik pengguna
-  yang sama, sama dengan env). Token tidak pernah ditulis ke berkas.
+- Terbukti di S2 (D-017): bentuk di atas (pembungkus `mcpServers`, `${VAR}` dari env anak) tersambung, `whoami`
+  dipanggil tanpa prompt, dan bagian `mcpServers` di `~/.claude.json` tidak berubah. Token tidak pernah ditulis ke berkas.
 
 ### Codex
 ```
-codex -c 'mcp_servers.agentdeck={url="http://127.0.0.1:<port>/mcp",bearer_token_env_var="AGENTDECK_TOKEN",default_tools_approval_mode="approve"}' \
-      -c 'tui.notifications=["agent-turn-complete","approval-requested"]' \
-      -c 'tui.notification_method="osc9"' \
+codex -c 'mcp_servers.agentdeck.url="http://127.0.0.1:<port>/mcp"' \
+      -c 'mcp_servers.agentdeck.bearer_token_env_var="AGENTDECK_TOKEN"' \
+      -c 'mcp_servers.agentdeck.default_tools_approval_mode="approve"' \
       "<tugas awal>"
 ```
 - `codex [PROMPT]` dan `-c key=value` ("Values parse as TOML if possible") terkonfirmasi di `codex --help` 0.163.0.
 - `[mcp_servers.<id>]` mendukung `url` (streamable HTTP) dan `bearer_token_env_var` (config-reference).
 - `default_tools_approval_mode = "approve"` berarti tool agentdeck tidak ditanyakan (D-008). Tool juga diberi anotasi
   `destructiveHint:false, openWorldHint:false` sehingga mode bawaan `auto` pun tidak bertanya.
-- `tui.notification_method="osc9"` membuat Codex mengirim notifikasi sebagai escape OSC 9 ke terminal, yang kita baca
-  untuk status (§6). agentdeck meneruskannya sebagai notifikasi macOS bila jendela tidak fokus.
+- Status Codex datang dari OSC 7501 tanpa konfigurasi (S5, D-016/D-017); `tui.notification*` tidak dipakai.
 - `CODEX_HOME` tidak diubah (berisi `auth.json`, login pengguna). Flag `-a`/`-s` tidak dipakai: sandbox dan approval
   mengikuti setelan pengguna.
-- **[Phase 0]** Bentuk inline table untuk `url` belum diuji (contoh resmi memakai `command`/`args`).
+- Terbukti di S3 (D-017): kunci per baris tersambung, `whoami` dipanggil tanpa prompt, `~/.codex/config.toml` tidak
+  berubah. Thread pembuat judul Codex memuat ulang config dan mencatat `invalid transport in mcp_servers.agentdeck`
+  (DEBUG, untuk inline table maupun kunci per baris); sesi utama tidak terpengaruh. Pantau di versi Codex berikutnya.
 
 ### Yang tidak pernah dilakukan
 Menulis `~/.claude.json`, `~/.claude/settings.json`, atau `~/.codex/config.toml`; memakai `--dangerously-*`,
@@ -194,7 +194,7 @@ Status: `starting`, `working`, `idle`, `needs_you`, `exited`, `unknown`. Sumber,
 
 | Sumber | Claude Code | Codex |
 |---|---|---|
-| Escape dari agen sendiri | OSC 7501 (Program Status Protocol rev 0.4, superlogical.com/rex/docs/build/program-status). Claude mengirim query `OSC 7501;?` dan **hanya melapor bila terminal menjawab**; agentdeck menjawab `ESC]7501;?:states=idle,working,done,blocked,error:kinds=permission,question,auth ESC\` (S4, D-016). Terlihat: `idle`, `working` (+`msg`), `done`, `blocked:kind=permission` (+`msg` base64 mis. "approve Write: …"). | OSC 7501 tanpa query: `state=idle\|working:app=codex` (S1, S5). `blocked` saat minta izin **[Phase 0: S5 belum tuntas]**; cadangan OSC 9 lewat `tui.notifications` bila `blocked` tidak dipancarkan. |
+| Escape dari agen sendiri | OSC 7501 (Program Status Protocol rev 0.4, superlogical.com/rex/docs/build/program-status). Claude mengirim query `OSC 7501;?` dan **hanya melapor bila terminal menjawab**; agentdeck menjawab `ESC]7501;?:states=idle,working,done,blocked,error:kinds=permission,question,auth ESC\` (S4, D-016). Terlihat: `idle`, `working` (+`msg`), `done`, `blocked:kind=permission` (+`msg` base64 mis. "approve Write: …"). | OSC 7501 tanpa query: `state=idle\|working:app=codex` (S1, S5). `blocked` saat minta izin, tanpa `kind` dan `msg` (S5, D-017). Setelah galat server Codex melapor `idle`, bukan `error`. |
 | Hook | Tidak perlu: OSC 7501 mencakup ketiga keadaan (S4). Cadangan bila protokol berubah: `--settings` dengan `Stop`, `Notification` `permission_prompt`, `UserPromptSubmit`. | Tidak dipakai: hook Codex harus dipercaya lewat `/hooks` atau `--dangerously-bypass-hook-trust` |
 | Heuristik | output dalam 1 detik terakhir → `working`; selain itu `unknown` | sama |
 
@@ -250,13 +250,13 @@ Langkah dan perintah lengkap: `docs/PHASE-0.md`. Setiap spike punya kriteria lul
 | # | Pertanyaan | Lulus bila |
 |---|---|---|
 | S1 | Tempel + Enter | Di Claude Code dan Codex, tempelan 3 baris dan tempelan 8 KB lewat bracketed paste + `\r` terkirim sebagai satu prompt utuh. **Lulus (D-013).** |
-| S2 | Injeksi MCP Claude | `/mcp` menampilkan `agentdeck` tersambung; tool bisa dipanggil tanpa prompt; bagian `mcpServers` di `~/.claude.json` sama sebelum/sesudah (berkas itu sendiri berubah tiap sesi). |
-| S3 | Injeksi MCP Codex | Tool agentdeck terdaftar dan bisa dipanggil tanpa prompt; tidak ada entri `agentdeck` di `~/.codex/config.toml` sesudahnya. |
+| S2 | Injeksi MCP Claude | `/mcp` menampilkan `agentdeck` tersambung; tool bisa dipanggil tanpa prompt; bagian `mcpServers` di `~/.claude.json` sama sebelum/sesudah (berkas itu sendiri berubah tiap sesi). **Lulus (D-017).** |
+| S3 | Injeksi MCP Codex | Tool agentdeck terdaftar dan bisa dipanggil tanpa prompt; tidak ada entri `agentdeck` di `~/.codex/config.toml` sesudahnya. **Lulus (D-017).** |
 | S4 | Status Claude | OSC 7501 terlihat untuk working/idle/needs_you setelah query dijawab. **Lulus (D-016).** |
-| S5 | Status Codex | OSC 7501 `blocked` saat minta izin dan `idle` saat turn selesai; cadangan OSC 9. **Sebagian (D-016).** |
+| S5 | Status Codex | OSC 7501 `blocked` saat minta izin dan `idle` saat turn selesai; cadangan OSC 9. **Lulus (D-017).** |
 | S6 | Throughput | 50 MB output (`cat` berkas besar) lewat Channel tanpa UI beku; ketikan tetap < 50 ms. |
-| S7 | Layar headless | `vt100` membaca layar Claude Code dan Codex dengan benar dan `bracketed_paste()` bernilai benar setelah TUI siap. |
-| S8 | Server MCP | `rmcp` 3.x + axum: middleware token, token → pane di handler, `instructions` terlihat oleh kedua agen, negosiasi versi protokol dengan kedua klien. |
+| S7 | Layar headless | `vt100` membaca layar Claude Code dan Codex dengan benar dan `bracketed_paste()` bernilai benar setelah TUI siap. **Lulus (D-013).** |
+| S8 | Server MCP | `rmcp` 3.x + axum: middleware token, token → pane di handler, `instructions` terlihat oleh kedua agen, negosiasi versi protokol dengan kedua klien. **Lulus (D-017).** |
 
 ## 11. Pengujian
 - **Unit (Rust):** policy relasi, batas dan rate limit, pengaman putaran, sanitasi pesan, pembentukan argv/env,
