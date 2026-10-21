@@ -84,6 +84,11 @@ Setiap pane agen mendapat environment:
 | `AGENTDECK_PANE_ID` | Mis. `p3` (informasi saja; identitas tetap dari token) |
 | `TERM`, `COLORTERM` | `xterm-256color`, `truecolor` |
 
+Environment anak disusun dari nol (D-014): hanya `HOME`, `USER`, `LOGNAME`, `SHELL`, `LANG`, `PATH` dari shell login,
+ditambah tabel di atas. Environment proses agentdeck tidak diwariskan, karena bila agentdeck dijalankan dari sesi
+Claude Code (mis. `pnpm tauri dev`), variabel `CLAUDE_CODE_*` dan `ANTHROPIC_BASE_URL` ikut terbawa dan mengubah
+perilaku agen (terlihat di S1).
+
 Nama variabel sengaja bukan `ANTHROPIC_*`: Claude Code mengosongkan `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, dan
 `NPM_TOKEN` saat mengekspansi `url`/`headers` MCP remote.
 
@@ -161,7 +166,11 @@ ESC[200~[agentdeck] message from p2 (codex, "review: auth"). Reply with pane_sen
   karakter demi karakter.
 - Claude Code meringkas tempelan > 800 karakter atau 3 baris menjadi `[Pasted text #N ...]`, tetapi isi lengkap tetap
   terkirim saat Enter (terminal-config).
-- **[Phase 0]** Jeda 150 ms dan perilaku Enter setelah tempelan di kedua TUI.
+- Jeda 150 ms lalu `\r` terbukti mengirim tempelan 3 baris dan 8 KB sebagai satu prompt di kedua TUI (S1, D-013).
+- Claude Code menandai isi tempelan sebagai teks dari luar dan hanya mengikuti instruksi di dalamnya bila bagian yang
+  diketik memintanya (terminal-config, "How Claude treats pasted text"). Karena pesan agentdeck seluruhnya tempelan,
+  **[Phase 2]** uji apakah Claude tetap mengerjakan permintaan dari pesan agen (mis. "perbaiki temuan ini"), bukan
+  hanya menjawab pertanyaan. Bila tidak, baris penanda ditulis di luar tempelan sebagai teks ketikan.
 
 ### 5.4 Siapa boleh mengirim ke siapa
 | Relasi pengirim → tujuan | `pane_send` | `pane_read` |

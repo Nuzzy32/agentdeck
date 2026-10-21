@@ -70,3 +70,31 @@ tetapi Windows/Linux tidak diuji di MVP.
 MXterm Pro produk tertutup: hanya konsep yang diambil; teks, preset, aset, dan binary tidak disalin. Nama tool memakai
 snake_case (`pane_send`) dan teks instructions ditulis sendiri. Kode T3 Code (MIT) boleh dipakai dengan pemberitahuan
 lisensi di berkas yang bersangkutan.
+
+## D-013 — Phase 0 S1: tempel + Enter (2026-10-21)
+Versi: Claude Code 2.1.303, Codex 0.163.0. Perintah: `docs/PHASE-0.md` S1 (environment bersih, jeda Enter 150 ms).
+Hasil: **lulus.** Tempelan 3 baris (88 B) dan 8 004 B lewat bracketed paste + `\r` masuk sebagai satu prompt di kedua
+agen; layar akhir (renderer S7) menunjukkan satu prompt dan satu jawaban. Claude menjawab benar untuk keduanya. Codex
+menjawab benar untuk 3 baris; dua percobaan 8 KB tampil utuh sebagai satu prompt, tetapi dijawab server "Selected model
+is at capacity" (gangguan server, bukan tempelan). Kedua TUI menyalakan bracketed paste sejak awal dan tetap menyala.
+Bukti: `spikes/out/s1-*.bin` (tidak di-commit). Dampak ke desain: jeda 150 ms dipertahankan; tanda [Phase 0] di
+ARCHITECTURE §5.3 dihapus.
+Temuan sampingan, dicatat untuk spike terkait:
+- **S5:** Codex 0.163.0 memancarkan `OSC 7501;state=idle:app=codex` dan `state=working:app=codex` tanpa konfigurasi
+  apa pun (tanpa `tui.notification_method`). Codex juga bertanya warna terminal (`OSC 10;?`, `OSC 11;?`).
+- **S4:** dengan environment bersih Claude Code mengirim query `OSC 7501;?` dan tidak memancarkan status karena probe
+  tidak menjawab. Format jawaban tidak ada di terminal-config; harus dicari sebelum S4.
+- **S7:** `vt100` 0.18.1 menampilkan layar akhir kedua TUI dengan benar; `bracketed_paste()` benar. API 0.18 memakai
+  `NonZeroU16` untuk ukuran (cuplikan di PHASE-0 diperbaiki).
+- Claude Code menandai isi tempelan sebagai teks dari luar (terminal-config). Risiko untuk pesan antar agen, diuji di
+  Phase 2 (ARCHITECTURE §5.3).
+- Probe memperbaiki positif palsu: teks `--expect` yang ada di dalam tempelan selalu "ditemukan" karena TUI
+  menampilkan ulang tempelan; sekarang ditolak.
+
+## D-014 — Environment agen disusun dari nol (2026-10-21)
+`launch.rs` tidak mewariskan environment proses agentdeck. Anak hanya mendapat `HOME`, `USER`, `LOGNAME`, `SHELL`,
+`LANG`, `PATH` (dari shell login), variabel `AGENTDECK_*`, `TERM`, `COLORTERM`. Alasan: saat S1 dijalankan dari sesi
+Claude Code, anak mewarisi ±35 variabel `CLAUDE_CODE_*`/`ANTHROPIC_BASE_URL`; Claude yang diluncurkan menolak menyimpan
+transcript ("inherited CLAUDE_CODE_CHILD_SESSION marker") dan `CLAUDE_CODE_DISABLE_TERMINAL_TITLE` mematikan status
+OSC 7501. Hal yang sama terjadi bila `pnpm tauri dev` dijalankan dari terminal Claude Code. Variabel lain milik
+pengguna (mis. proxy) ditambah lewat daftar izin di Settings bila nanti dibutuhkan, bukan diwariskan diam-diam.

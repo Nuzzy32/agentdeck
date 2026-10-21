@@ -46,6 +46,8 @@ def main() -> int:
     if a.paste_file:
         with open(a.paste_file, encoding="utf-8") as f:
             text = f.read()
+    if a.expect and text and a.expect in text:
+        ap.error("--expect must not occur in the pasted text: the TUI echoes the paste, so it would always be found")
 
     pid, fd = pty.fork()
     if pid == 0:  # child: size the terminal before the program reads it, then replace this process

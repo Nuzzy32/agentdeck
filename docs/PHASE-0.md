@@ -24,19 +24,25 @@ python3 -I spikes/pty_probe.py --help
 ## S1 — Tempel + Enter
 **Pertanyaan:** apakah bracketed paste lalu `\r` terkirim sebagai satu prompt utuh?
 
+Jalankan agen dengan environment bersih (seperti aplikasi yang dibuka dari Finder), bukan environment terminal tempat
+probe dijalankan; bila probe dijalankan dari sesi Claude Code, variabel `CLAUDE_CODE_*` ikut terbawa dan mengubah
+perilaku agen. Teks `--expect` tidak boleh ada di dalam tempelan (TUI menampilkan ulang tempelan; probe menolaknya).
+
 ```bash
 cd ~/dev/agentdeck
-python3 -I spikes/pty_probe.py --log spikes/out/s1-claude.bin --paste-at 10 --duration 60 \
-  --paste $'Line one is context.\nLine two is context.\nReply with the single word PONG17 and nothing else.' \
-  --expect PONG17 -- claude
-python3 -I spikes/pty_probe.py --log spikes/out/s1-codex.bin --paste-at 10 --duration 60 \
-  --paste $'Line one is context.\nLine two is context.\nReply with the single word PONG17 and nothing else.' \
-  --expect PONG17 -- codex
+CLEAN=(env -i HOME="$HOME" USER="$USER" LOGNAME="$LOGNAME" SHELL="$SHELL" LANG=en_US.UTF-8 PATH="$(zsh -l -c 'printf %s "$PATH"')")
+"${CLEAN[@]}" python3 -I spikes/pty_probe.py --log spikes/out/s1-claude.bin --paste-at 10 --duration 60 \
+  --paste $'Line one is context.\nLine two is context.\nWhat is 1234+4321? Reply with only the number.' \
+  --expect 5555 -- claude
+"${CLEAN[@]}" python3 -I spikes/pty_probe.py --log spikes/out/s1-codex.bin --paste-at 10 --duration 60 \
+  --paste $'Line one is context.\nLine two is context.\nWhat is 1234+4321? Reply with only the number.' \
+  --expect 5555 -- codex
 ```
-Ulangi dengan tempelan besar: buat berkas ±8 KB (`spikes/out/big.txt`, teks bebas diakhiri kalimat "Reply with the
-single word PONG18") lalu `--paste-file spikes/out/big.txt --expect PONG18`.
+Ulangi dengan tempelan besar: buat berkas ±8 KB (`spikes/out/big.txt`, teks pengisi diakhiri "What is 2468+1357?
+Reply with only the number.") lalu `--paste-file spikes/out/big.txt --expect 3825`.
 
-**Lulus:** `FOUND` untuk keempat percobaan, dan jawaban hanya muncul sekali (prompt tidak terpecah per baris).
+**Lulus:** `FOUND` untuk keempat percobaan, dan layar akhir (renderer S7) menunjukkan satu prompt dan satu jawaban
+(prompt tidak terpecah per baris).
 **Bila gagal:** coba `--enter-delay 0.4`; catat jeda terkecil yang selalu berhasil. Bila tetap gagal, tempel tanpa
 baris baru (ganti `\n` dengan spasi) dan catat sebagai batasan.
 
@@ -80,10 +86,14 @@ cargo new --bin /tmp/agentdeck-s7 && cd /tmp/agentdeck-s7 && cargo add vt100@0.1
 ```
 `src/main.rs`:
 ```rust
+use std::num::NonZeroU16;
+
 fn main() {
     let path = std::env::args().nth(1).expect("usage: agentdeck-s7 <raw log>");
     let bytes = std::fs::read(path).expect("read log");
-    let mut parser = vt100::Parser::new(40, 120, 1000); // same size as pty_probe.py
+    // same size as pty_probe.py; vt100 0.18 takes NonZeroU16 sizes
+    let (rows, cols) = (NonZeroU16::new(40).unwrap(), NonZeroU16::new(120).unwrap());
+    let mut parser = vt100::Parser::new(rows, cols, 1000);
     parser.process(&bytes);
     let screen = parser.screen();
     println!("bracketed_paste={} alternate_screen={}", screen.bracketed_paste(), screen.alternate_screen());
@@ -94,7 +104,7 @@ fn main() {
 cargo run -q -- ~/dev/agentdeck/spikes/out/s1-claude.bin
 cargo run -q -- ~/dev/agentdeck/spikes/out/s1-codex.bin
 ```
-**Lulus:** teks yang tercetak sama dengan yang terlihat di terminal sungguhan pada akhir sesi (jawaban `PONG17` dan
+**Lulus:** teks yang tercetak sama dengan yang terlihat di terminal sungguhan pada akhir sesi (jawaban `5555` dan
 kotak input), dan `bracketed_paste=true` sebelum agen keluar. Catatan: probe menghentikan agen di akhir, jadi rekam
 dengan `--duration` yang cukup panjang dan perhatikan bahwa keluarnya agen bisa mematikan bracketed paste.
 
