@@ -12,7 +12,7 @@ MXterm Pro yang terbukti bekerja. Konsekuensi: pemilik belajar Rust; logika inti
 Versi saat diputuskan (crates.io / npm, 2026-10-21): `tauri` 2.12.4, `portable-pty` 0.9.0, `rmcp` 3.6.0 (fitur
 `transport-streamable-http-server`) + `axum`, `vt100` 0.18.1, `@xterm/xterm` 6.0.0, `@xterm/addon-fit` 0.11.0,
 `@xterm/addon-webgl` 0.19.0. Ditolak: `alacritty_terminal` (lebih berat dari kebutuhan), `wezterm-term` (tidak ada di
-crates.io). Prasyarat: Rust belum terpasang di mesin pemilik (2026-10-21); pasang lewat rustup saat Phase 0.
+crates.io). Rust 1.99.1 terpasang lewat rustup (2026-10-21).
 
 ## D-003 — Model kerja: CLI di PTY + MCP lokal + tempel (2026-10-21)
 Agen dijalankan sebagai CLI interaktif; agen memanggil agentdeck lewat MCP; agentdeck mengirim prompt dengan menulis ke

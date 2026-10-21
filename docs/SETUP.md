@@ -13,7 +13,7 @@ macOS, Apple Silicon. Versi yang disebut adalah yang terbaru per 2026-10-21; ver
 | Claude Code, Codex (untuk mencoba alur agen) | `claude --version`, `codex --version` | Sudah ada (2.1.303, 0.163.0); pastikan sudah login |
 | jq (spike S2) | `jq --version` | Bawaan macOS |
 
-Status mesin pemilik per 2026-10-21: semua ada **kecuali Rust**.
+Status mesin pemilik per 2026-10-21: semua ada. Rust 1.99.1 (clippy, rustfmt) dipasang lewat rustup; `~/.zprofile` memuat `~/.cargo/env`.
 
 Setelah rustup:
 ```bash

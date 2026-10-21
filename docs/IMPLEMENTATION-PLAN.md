@@ -5,7 +5,7 @@ atau PR). Kolom **Butuh** menyebut task yang harus selesai lebih dulu; task tanp
 dikerjakan paralel (ditandai ∥). Setiap task selesai bila kriteria **Selesai bila** terpenuhi dan workflow di
 `AGENTS.md` dijalankan.
 
-Status: `todo` semua per 2026-10-21. Perbarui kolom status di sini saat task selesai.
+Status per 2026-10-21: T0.1 selesai (Rust 1.99.1); task lain `todo`. Perbarui baris ini saat task selesai.
 
 ## Phase 0 — Spike kelayakan
 Panduan lengkap: `docs/PHASE-0.md`. Tidak ada kode produk.
