@@ -5,3 +5,11 @@ src-tauri/target/
 .DS_Store
 spikes/*/target/
 spikes/*/Cargo.lock
+
+# Frontend (from create-tauri-app)
+dist-ssr
+*.local
+*.log
+.vscode/*
+!.vscode/extensions.json
+.idea
