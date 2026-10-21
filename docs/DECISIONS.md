@@ -45,7 +45,7 @@ menampilkan kuota yang diambil dari kredensial.
   lokal yang menjalankan CLI milik pengguna memerlukan Commercial Terms. Untuk pemakaian pribadi tidak ada larangan
   yang ditemukan.
 
-## D-007 — Status dari sinyal agen sendiri (2026-10-21, sementara sampai S4/S5)
+## D-007 — Status dari sinyal agen sendiri (2026-10-21; Claude terbukti di S4, Codex sebagian di S5, lihat D-016)
 Urutan: escape dari agen (Claude OSC 7501, Codex OSC 9 lewat `tui.notification_method="osc9"`), lalu hook (Claude
 lewat `--settings`), lalu heuristik output. Hook Codex tidak dipakai karena butuh kepercayaan lewat `/hooks` atau
 `--dangerously-bypass-hook-trust`. Membaca layar tidak dipakai untuk status karena rapuh terhadap perubahan TUI.
@@ -113,3 +113,22 @@ Yang **tidak** diambil:
 - Gemini CLI di peluncur MVP (katalog pengguna adalah P1, AGT-06).
 Perbaikan wajib saat implementasi: pemendekan header (nama agen tidak pernah dipotong) dan `aria-label` untuk semua
 tombol ikon, termasuk sidebar dan status bar (UI-UX §3, §8).
+
+## D-016 — Phase 0 S4: status Claude Code lewat OSC 7501 (2026-10-21)
+Versi: Claude Code 2.1.303, Codex 0.163.0. Perintah: `docs/PHASE-0.md` S4 (`pty_probe.py --osc7501`, environment bersih).
+Spesifikasi: Program Status Protocol (OSC 7501) rev 0.4, 2026-10-10,
+https://www.superlogical.com/rex/docs/build/program-status (ringkasan: control-codes.page/proposals/osc-7501).
+Hasil S4: **lulus.** Claude mengirim `OSC 7501;?` saat mulai dan hanya melapor bila terminal menjawab
+`OSC 7501;?:states=idle,working,done,blocked,error:kinds=permission,question,auth ST`. Setelah dijawab:
+`state=idle:app=claude-code` → `state=working` (dengan `msg`=base64 "Writing spikes/out/s4.txt") → `state=done`, dan
+`state=blocked:kind=permission:msg=<base64 "approve Write: /…/s4.txt">` saat meminta izin (diuji dengan
+`--permission-mode default` khusus spike). Ketiga keadaan PRD terbedakan tanpa hook, jadi hook `--settings` tidak
+dipakai (pertanyaan "apakah `--settings` menimpa hook pengguna" tidak perlu dijawab).
+Hasil S5 (sebagian): Codex memancarkan `state=idle|working:app=codex` tanpa query dan tanpa konfigurasi. Status
+`blocked` belum terlihat: dua kali server membalas "Selected model is at capacity" sebelum Codex sampai ke permintaan
+izin; setelah galat itu Codex melapor `idle`, bukan `error`. Ulangi S5 saat kapasitas normal.
+Dampak ke desain: `status.rs` membaca OSC 7501 untuk kedua agen dan `screen.rs`/pemindai OSC wajib menjawab query
+`OSC 7501;?` (tanpa jawaban, Claude diam). Pemetaan ke status agentdeck di ARCHITECTURE §6. `msg` adalah teks dari
+agen: didekode dengan batas spesifikasi dan hanya ditampilkan, tidak pernah dieksekusi. Konfigurasi
+`tui.notification*` untuk Codex ditahan sebagai cadangan sampai S5 tuntas.
+Bukti: `spikes/out/s4-*.bin`, `spikes/out/s5-*.bin` (tidak di-commit).

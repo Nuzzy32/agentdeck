@@ -35,6 +35,7 @@ def main() -> int:
     ap.add_argument("--enter-delay", type=float, default=0.15, help="seconds between paste end and Enter")
     ap.add_argument("--expect", help="string that should appear in the output after the paste")
     ap.add_argument("--duration", type=float, default=60.0, help="seconds before the program is stopped")
+    ap.add_argument("--osc7501", action="store_true", help="answer the OSC 7501 feature query (program status)")
     ap.add_argument("--rows", type=int, default=40)
     ap.add_argument("--cols", type=int, default=120)
     ap.add_argument("cmd", nargs=argparse.REMAINDER, help="-- command [args...]")
@@ -73,6 +74,9 @@ def main() -> int:
                 os.write(fd, b"\x1b[1;1R")
             if b"\x1b[c" in chunk or b"\x1b[0c" in chunk:
                 os.write(fd, b"\x1b[?62;22c")
+            # Program Status Protocol rev 0.4: a terminal that supports it answers the feature query.
+            if a.osc7501 and re.search(rb"\x1b\]7501;\?(?:\x07|\x1b\\)", chunk):
+                os.write(fd, b"\x1b]7501;?:states=idle,working,done,blocked,error:kinds=permission,question,auth\x1b\\")
         if text is not None and paste_offset is None and time.monotonic() - start >= a.paste_at:
             os.write(fd, b"\x1b[200~" + text.encode() + b"\x1b[201~")
             time.sleep(a.enter_delay)

@@ -194,9 +194,13 @@ Status: `starting`, `working`, `idle`, `needs_you`, `exited`, `unknown`. Sumber,
 
 | Sumber | Claude Code | Codex |
 |---|---|---|
-| Escape dari agen sendiri | OSC 7501, protokol status pane resmi (butuh v2.1.295+, tidak di dalam tmux) **[Phase 0: format]** | OSC 9 dari `tui.notifications`: `agent-turn-complete` → `idle`, `approval-requested` → `needs_you` **[Phase 0: format teks]** |
-| Hook | `--settings` dengan `Stop` → `idle`, `Notification` `permission_prompt` → `needs_you`, `idle_prompt` → `idle`, `UserPromptSubmit` → `working` **[Phase 0: apakah `--settings` menimpa hook milik pengguna]** | Tidak dipakai: hook Codex harus dipercaya lewat `/hooks` atau `--dangerously-bypass-hook-trust` |
+| Escape dari agen sendiri | OSC 7501 (Program Status Protocol rev 0.4, superlogical.com/rex/docs/build/program-status). Claude mengirim query `OSC 7501;?` dan **hanya melapor bila terminal menjawab**; agentdeck menjawab `ESC]7501;?:states=idle,working,done,blocked,error:kinds=permission,question,auth ESC\` (S4, D-016). Terlihat: `idle`, `working` (+`msg`), `done`, `blocked:kind=permission` (+`msg` base64 mis. "approve Write: …"). | OSC 7501 tanpa query: `state=idle\|working:app=codex` (S1, S5). `blocked` saat minta izin **[Phase 0: S5 belum tuntas]**; cadangan OSC 9 lewat `tui.notifications` bila `blocked` tidak dipancarkan. |
+| Hook | Tidak perlu: OSC 7501 mencakup ketiga keadaan (S4). Cadangan bila protokol berubah: `--settings` dengan `Stop`, `Notification` `permission_prompt`, `UserPromptSubmit`. | Tidak dipakai: hook Codex harus dipercaya lewat `/hooks` atau `--dangerously-bypass-hook-trust` |
 | Heuristik | output dalam 1 detik terakhir → `working`; selain itu `unknown` | sama |
+
+Pemetaan OSC 7501 → status agentdeck: `idle`/`done` → `idle`, `working` → `working`, `blocked` → `needs_you`,
+`error` → `idle` dengan tanda galat di header. Rekaman `working`/`blocked` dibuang saat proses keluar (rev 0.4).
+`msg` didekode dan ditampilkan sebagai tooltip header; panjang dibatasi, karakter kontrol ditolak (spesifikasi).
 
 Aturan: output baru tidak pernah mengubah `needs_you` atau `idle` dari sinyal resmi menjadi `working` sebelum ada
 sinyal berikutnya atau input baru. `unknown` tidak pernah dianggap selesai.
@@ -245,11 +249,11 @@ Langkah dan perintah lengkap: `docs/PHASE-0.md`. Setiap spike punya kriteria lul
 
 | # | Pertanyaan | Lulus bila |
 |---|---|---|
-| S1 | Tempel + Enter | Di Claude Code dan Codex, tempelan 3 baris dan tempelan 8 KB lewat bracketed paste + `\r` terkirim sebagai satu prompt utuh. |
+| S1 | Tempel + Enter | Di Claude Code dan Codex, tempelan 3 baris dan tempelan 8 KB lewat bracketed paste + `\r` terkirim sebagai satu prompt utuh. **Lulus (D-013).** |
 | S2 | Injeksi MCP Claude | `/mcp` menampilkan `agentdeck` tersambung; tool bisa dipanggil tanpa prompt; bagian `mcpServers` di `~/.claude.json` sama sebelum/sesudah (berkas itu sendiri berubah tiap sesi). |
 | S3 | Injeksi MCP Codex | Tool agentdeck terdaftar dan bisa dipanggil tanpa prompt; tidak ada entri `agentdeck` di `~/.codex/config.toml` sesudahnya. |
-| S4 | Status Claude | Format OSC 7501 terdokumentasi dan terlihat di stream PTY untuk working/idle/needs_you; bila tidak, hook lewat `--settings` bekerja tanpa mematikan hook pengguna. |
-| S5 | Status Codex | OSC 9 muncul di stream untuk turn selesai dan permintaan approval, teksnya bisa dibedakan. |
+| S4 | Status Claude | OSC 7501 terlihat untuk working/idle/needs_you setelah query dijawab. **Lulus (D-016).** |
+| S5 | Status Codex | OSC 7501 `blocked` saat minta izin dan `idle` saat turn selesai; cadangan OSC 9. **Sebagian (D-016).** |
 | S6 | Throughput | 50 MB output (`cat` berkas besar) lewat Channel tanpa UI beku; ketikan tetap < 50 ms. |
 | S7 | Layar headless | `vt100` membaca layar Claude Code dan Codex dengan benar dan `bracketed_paste()` bernilai benar setelah TUI siap. |
 | S8 | Server MCP | `rmcp` 3.x + axum: middleware token, token → pane di handler, `instructions` terlihat oleh kedua agen, negosiasi versi protokol dengan kedua klien. |

@@ -49,33 +49,35 @@ baris baru (ganti `\n` dengan spasi) dan catat sebagai batasan.
 ## S4 — Status Claude Code
 **Pertanyaan:** sinyal apa yang dipancarkan Claude Code untuk working / idle / needs_you?
 
-1. Baca halaman resmi `https://code.claude.com/docs/en/terminal-config` bagian status pane (OSC 7501): format, syarat
-   versi, cara mengaktifkan. Catat URL dan kutipan.
-2. Lihat keluaran S1 (`s1-claude.bin`): baris `OSC ...` sebelum dan sesudah `>>> pasted`.
-3. Picu permintaan izin: `--paste "Create a file named spikes/out/s4.txt containing hi"` (tanpa izin bawaan untuk Write,
-   Claude akan bertanya). Cari OSC baru saat prompt izin muncul.
-4. Bila OSC 7501 tidak muncul: uji hook lewat `--settings`. Buat `spikes/out/s4-settings.json`:
-   ```json
-   {"hooks": {
-     "UserPromptSubmit": [{"hooks": [{"type": "command", "command": "echo working >> /tmp/agentdeck-s4.log"}]}],
-     "Stop":             [{"hooks": [{"type": "command", "command": "echo idle >> /tmp/agentdeck-s4.log"}]}],
-     "Notification":     [{"matcher": "permission_prompt", "hooks": [{"type": "command", "command": "echo needs_you >> /tmp/agentdeck-s4.log"}]}]
-   }}
-   ```
-   Jalankan probe dengan `-- claude --settings spikes/out/s4-settings.json`, lalu baca `/tmp/agentdeck-s4.log`.
-   Periksa juga bahwa hook milikmu di `~/.claude/settings.json` (bila ada) tetap berjalan pada sesi yang sama.
+Claude memakai Program Status Protocol (OSC 7501, rev 0.4,
+https://www.superlogical.com/rex/docs/build/program-status): ia mengirim query `OSC 7501;?` dan hanya melapor bila
+terminal menjawab. `--osc7501` membuat probe menjawab query itu. `CLEAN` dari S1.
 
-**Lulus:** ada sinyal yang bisa dibedakan untuk ketiga keadaan, dengan sumber yang terdokumentasi, dan hook pengguna
-tidak hilang.
+```bash
+"${CLEAN[@]}" python3 -I spikes/pty_probe.py --osc7501 --log spikes/out/s4-claude-idle.bin --paste-at 10 --duration 45 \
+  --paste 'What is 1234+4321? Reply with only the number.' --expect 5555 -- claude
+# --permission-mode default hanya untuk spike: memaksa prompt izin (lebih ketat, bukan bypass). Izin tidak dijawab.
+"${CLEAN[@]}" python3 -I spikes/pty_probe.py --osc7501 --log spikes/out/s4-claude-perm.bin --paste-at 10 --duration 50 \
+  --paste 'Create a file named spikes/out/s4.txt containing hi' -- claude --permission-mode default
+```
+`msg` berisi base64; dekode untuk membaca alasannya.
+
+**Lulus:** `state=working`, `state=done`/`idle`, dan `state=blocked` saat prompt izin muncul. Hasil: lulus (D-016).
+**Bila gagal:** hook lewat `--settings` (`UserPromptSubmit`, `Stop`, `Notification` `permission_prompt`) sebagai cadangan,
+dan periksa bahwa hook pengguna tetap berjalan.
 
 ## S5 — Status Codex
+Codex memancarkan OSC 7501 tanpa query (terlihat di S1). Yang belum terlihat: `blocked` saat meminta izin.
+
 ```bash
-python3 -I spikes/pty_probe.py --log spikes/out/s5-codex.bin --paste-at 10 --duration 90 \
-  --paste "Create a file named spikes/out/s5.txt containing hi" -- \
-  codex -c 'tui.notifications=["agent-turn-complete","approval-requested"]' -c 'tui.notification_method="osc9"'
+# -s read-only -a on-request hanya untuk spike: memaksa permintaan izin. Izin tidak dijawab.
+"${CLEAN[@]}" python3 -I spikes/pty_probe.py --osc7501 --log spikes/out/s5-codex-perm.bin --paste-at 10 --duration 90 \
+  --paste 'Create a file named spikes/out/s5.txt containing hi' -- codex -s read-only -a on-request
 ```
-**Lulus:** `OSC 9` muncul saat Codex meminta izin dan saat turn selesai, dan teks keduanya bisa dibedakan. Catat teks
-persisnya. Bila Codex tidak meminta izin (setelan approval-mu longgar), ulangi dengan `-a on-request` hanya untuk spike ini.
+**Lulus:** `state=blocked` (dengan `kind`) saat Codex meminta izin, dan `idle` saat turn selesai. Periksa layar akhir
+(renderer S7): bila tertulis "Selected model is at capacity", percobaan tidak sah, ulangi nanti.
+**Bila `blocked` tidak dipancarkan:** ulangi dengan `-c 'tui.notifications=["agent-turn-complete","approval-requested"]'
+-c 'tui.notification_method="osc9"'` dan catat teks OSC 9 untuk permintaan izin.
 
 ## S7 — Layar headless dengan `vt100`
 **Pertanyaan:** apakah `vt100` membaca layar kedua TUI dengan benar?
