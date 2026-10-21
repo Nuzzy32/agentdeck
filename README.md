@@ -4,7 +4,7 @@ Terminal desktop untuk menjalankan Claude Code, Codex, dan agen CLI lain berdamp
 melempar prompt: satu agen membuka agen lain, memberi tugas, membaca layarnya, dan menerima hasilnya. Setiap agen
 adalah CLI resmi dengan login milikmu; agentdeck hanya menyediakan terminal dan jembatan MCP lokal.
 
-**Status:** perencanaan. Belum ada kode.
+**Status:** Phase 0 hampir selesai, kerangka Tauri ada. Titik lanjut: [docs/PROGRESS.md](docs/PROGRESS.md).
 
 ## Dokumen
 | Berkas | Isi |
