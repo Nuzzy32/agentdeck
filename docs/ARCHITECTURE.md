@@ -11,7 +11,7 @@ Dokumen ini menjelaskan bagaimana agentdeck bekerja. Apa yang dibangun dan kenap
 │                                                                                          │
 │  WebView (React + xterm.js)                    Core (Rust, tokio)                         │
 │  ┌──────────────────────────┐   invoke    ┌──────────────────────────────────────────┐   │
-│  │ Tab / split layout       │ ──────────▶ │ PaneManager   portable-pty, 1 thread baca│   │
+│  │ Sidebar / split layout   │ ──────────▶ │ PaneManager   portable-pty, 1 thread baca│   │
 │  │ TerminalPane × N         │ ◀────────── │ Screen        vt100 per pane             │   │
 │  │ Kartu persetujuan        │   Channel   │ StatusTracker OSC / hook / heuristik     │   │
 │  │ Log pesan, Settings      │   (bytes)   │ Delivery      antrean + pengaman putaran │   │
@@ -51,7 +51,7 @@ Agen adalah proses CLI biasa di PTY. Agen berbicara ke agentdeck lewat MCP; agen
 ### WebView (React + TypeScript, `src/`)
 | Bagian | Tugas |
 |---|---|
-| `layout/` | Tab (= workspace) dan pohon split. |
+| `layout/` | Workspace (sidebar) dan pohon split. |
 | `pane/TerminalPane.tsx` | `@xterm/xterm` + `addon-fit` + `addon-webgl`; menerima byte lewat Tauri `Channel`, mengirim ketikan lewat `invoke`. |
 | `cards/` | Kartu persetujuan spawn dan jeda pengaman putaran. |
 | `messages/` | Log pesan antar agen per workspace. |
@@ -177,9 +177,9 @@ ESC[200~[agentdeck] message from p2 (codex, "review: auth"). Reply with pane_sen
 |---|---|---|
 | induk → anak sendiri | ya | ya |
 | anak → induk (`"parent"`) | ya | ya |
-| peer (pane agen lain di tab yang sama) | hanya bila "Agen boleh saling kirim" aktif | sama |
+| peer (pane agen lain di workspace yang sama) | hanya bila "Agen boleh saling kirim" aktif | sama |
 | pane shell | tidak (MVP) | tidak (MVP) |
-| tab lain, diri sendiri | tidak | tidak |
+| workspace lain, diri sendiri | tidak | tidak |
 
 ### 5.5 Pengaman putaran
 - Penghitung per workspace: bertambah setiap pesan agen terkirim, kembali ke 0 saat orang menekan Enter di pane mana pun
@@ -219,7 +219,7 @@ bukan dari `Mcp-Session-Id`: protokol MCP `2026-07-28` menghapus sesi (SEP-2567)
 ## 8. Penyimpanan
 `~/Library/Application Support/<bundle-id>/`:
 - `settings.json`: sakelar dan angka batas.
-- `layout.json` (P1): tab dan split.
+- `layout.json` (P1): workspace dan split.
 - `logs/messages-YYYY-MM-DD.jsonl`: `ts`, `workspace`, `from`, `to`, `message_id`, `state`, `reason`, `text`.
   Disimpan 14 hari.
 - `logs/audit-YYYY-MM-DD.jsonl`: spawn diminta/disetujui/ditolak, jeda pengaman putaran, pane ditutup.

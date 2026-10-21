@@ -56,12 +56,12 @@ Prioritas: **P0** wajib untuk MVP, **P1** setelah alur inti stabil, **P2** nanti
 ### 6.1 Terminal (TERM)
 | ID | P | Persyaratan |
 |---|---|---|
-| TERM-01 | P0 | Tab dan split pane (horizontal/vertikal), ubah ukuran dengan seret, fokus dengan klik dan pintasan keyboard. |
+| TERM-01 | P0 | Workspace (daftar di sidebar) dan split pane (horizontal/vertikal), ubah ukuran dengan seret, fokus dengan klik dan pintasan keyboard. |
 | TERM-02 | P0 | Pane shell memakai shell login pengguna (`$SHELL -l`) di folder pilihan. |
 | TERM-03 | P0 | Rendering xterm.js: warna 256/truecolor, Unicode/emoji, salin-tempel, scrollback ≥ 10.000 baris, cari teks. |
 | TERM-04 | P0 | Ukuran PTY mengikuti ukuran pane (resize). |
 | TERM-05 | P0 | Menutup pane atau aplikasi menghentikan seluruh grup proses pane; tidak ada proses yatim. |
-| TERM-06 | P1 | Tata letak tab dan pane dipulihkan saat aplikasi dibuka lagi (tanpa memulihkan proses). |
+| TERM-06 | P1 | Tata letak workspace dan pane dipulihkan saat aplikasi dibuka lagi (tanpa memulihkan proses). |
 | TERM-07 | P1 | Tema terang/gelap mengikuti sistem; font dan ukuran bisa diatur. |
 
 ### 6.2 Agen (AGT)
@@ -156,7 +156,7 @@ tempel + Enter di Claude Code dan Codex; injeksi MCP per peluncuran di keduanya;
 lewat Tauri Channel; crate emulator headless untuk membaca layar.
 
 ### Phase 1: Fondasi terminal
-Proyek Tauri, tab dan split, pane shell, xterm.js, PTY, resize, penghentian proses (TERM-01..05), katalog dan peluncuran
+Proyek Tauri, workspace dan split, pane shell, xterm.js, PTY, resize, penghentian proses (TERM-01..05), katalog dan peluncuran
 agen manual (AGT-01..04).
 
 ### Phase 2: Jembatan MCP dan pesan

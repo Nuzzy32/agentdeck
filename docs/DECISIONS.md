@@ -98,3 +98,18 @@ Claude Code, anak mewarisi ±35 variabel `CLAUDE_CODE_*`/`ANTHROPIC_BASE_URL`; C
 transcript ("inherited CLAUDE_CODE_CHILD_SESSION marker") dan `CLAUDE_CODE_DISABLE_TERMINAL_TITLE` mematikan status
 OSC 7501. Hal yang sama terjadi bila `pnpm tauri dev` dijalankan dari terminal Claude Code. Variabel lain milik
 pengguna (mis. proxy) ditambah lewat daftar izin di Settings bila nanti dibutuhkan, bukan diwariskan diam-diam.
+
+## D-015 — Acuan visual: prototipe Claude Design (2026-10-21)
+Prototipe "agentdeck Prototype" di Claude Design
+(https://claude.ai/design/p/54f25ab8-5160-4612-9f8f-13420aa64ade) menjadi acuan visual T1.2 dan seterusnya. Tokennya
+sama dengan UI-UX §6. Yang diambil dan dicatat di UI-UX:
+- **Sidebar kiri** (daftar workspace + pohon pane induk–anak, 200 px, `⌘B` untuk menciutkan) menggantikan tab bar.
+  Alasan: relasi induk–anak terlihat tanpa membaca header. "Tab" di dokumen lain diganti "workspace".
+- **Settings sebagai modal** di jendela utama, bukan jendela terpisah. Alasan: lebih sederhana di Tauri.
+Yang **tidak** diambil:
+- Sorotan blok "pesan dari p2" di dalam isi terminal. Claude Code dan Codex memakai alternate screen (S1), jadi
+  dekorasi baris xterm.js bergeser saat TUI menggambar ulang. Penanda pesan: baris `[agentdeck] message from …`,
+  chip header, kilatan tepi, panel Pesan.
+- Gemini CLI di peluncur MVP (katalog pengguna adalah P1, AGT-06).
+Perbaikan wajib saat implementasi: pemendekan header (nama agen tidak pernah dipotong) dan `aria-label` untuk semua
+tombol ikon, termasuk sidebar dan status bar (UI-UX §3, §8).

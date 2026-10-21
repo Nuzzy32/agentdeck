@@ -47,7 +47,7 @@ protokol JSON-RPC), agar agen bisa membacanya dan menyesuaikan.
 ---
 
 ## `pane_list` (P0)
-Daftar pane di workspace (tab) pemanggil.
+Daftar pane di workspace pemanggil.
 
 **Argumen:** tidak ada.
 
@@ -116,7 +116,7 @@ menahan antrean; pesan tetap tersimpan sampai orang memutuskan.
 **Galat:**
 | Kode | Arti | Saran untuk agen |
 |---|---|---|
-| `NOT_ALLOWED` | Relasi tidak mengizinkan (tab lain, bukan induk/anak). | Periksa `pane_list`, kolom `can_send`. |
+| `NOT_ALLOWED` | Relasi tidak mengizinkan (workspace lain, bukan induk/anak). | Periksa `pane_list`, kolom `can_send`. |
 | `PEER_SEND_OFF` | Tujuan peer, sakelar workspace mati. | Beri tahu orang; jangan cari jalan lain. |
 | `TARGET_SHELL` | Tujuan pane shell. | Tidak didukung. |
 | `TARGET_EXITED` | Agen tujuan sudah keluar. | Baca layarnya bila boleh, beri tahu orang. |
