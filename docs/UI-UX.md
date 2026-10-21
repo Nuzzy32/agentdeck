@@ -1,0 +1,246 @@
+# agentdeck — Spesifikasi UI/UX
+
+Aplikasi desktop macOS untuk developer: padat, cepat, dikendalikan keyboard. Terminal adalah isi utama; semua kontrol
+lain kecil dan tenang supaya tidak bersaing dengan output agen. Persyaratan yang dirujuk (TERM-, MSG-, SPN-, ...) ada di
+`docs/PRD.md`.
+
+Bahasa UI: Indonesia (pengguna tunggal). Teks yang dibaca agen (penanda pesan, instructions MCP) tetap Inggris
+(`docs/MCP-TOOLS.md`).
+
+## 1. Prinsip
+1. **Terminal dulu.** Chrome aplikasi (tab, header, panel) memakai ruang sekecil mungkin; tidak ada dekorasi.
+2. **Tidak pernah mencuri fokus.** Kartu, toast, dan pesan masuk tidak memindahkan fokus keyboard dari pane tempat orang
+   mengetik. Ketikan orang tidak boleh berakhir di tempat yang salah.
+3. **Status selalu terbaca tanpa warna.** Setiap titik status disertai teks atau ikon berbeda.
+4. **Setiap aksi agen terlihat.** Spawn, pesan, dan jeda tampil di tempat yang jelas dan bisa dilacak di log.
+5. **Keyboard penuh.** Semua aksi punya pintasan atau bisa dicapai dengan Tab; fokus selalu terlihat.
+
+## 2. Anatomi jendela
+
+```
+┌──────────────────────────────────────────────────────────────────────────────────────────┐
+│ ● ● ●   [ api ● ] [ web ] [ + ]                                                 [≡ Pesan]│ tab bar 32px
+├──────────────────────────────────────────────────────────┬───────────────────────────────┤
+│ ● idle  p1 · Claude Code · feat: auth   ~/dev/app   ⊟ ⊞ ✕│ PESAN · api        [Semua ▾]  │
+│                                                          │ 14:02 p1 → p2  terkirim       │
+│  (xterm.js)                                              │   Review the diff on branch…  │
+│                                                          │ 14:09 p2 → p1  menunggu       │
+├──────────────────────────────────────────────────────────┤   RESULT status=done files=…  │
+│ ◐ working  p2 · Codex · review: auth  anak p1  1 pesan ⊟ ✕│                               │
+│                                                          │                               │
+│  (xterm.js)                                              │                               │
+│                                                          │                               │
+├──────────────────────────────────────────────────────────┴───────────────────────────────┤
+│ MCP aktif · Agen membuka pane: aktif · Saling kirim: mati · Pesan antar agen 3/12        │ status bar 24px
+└──────────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+| Area | Ukuran | Isi |
+|---|---|---|
+| Tab bar | 32 px | Satu tab = satu workspace. Nama (folder kerja atau nama pilihan), titik amber bila ada pane `needs_you`, tombol `+`. Lampu jendela macOS tetap native. |
+| Workspace | sisa | Pohon split pane. |
+| Panel Pesan | 320 px, bisa disembunyikan | Log pesan workspace aktif (§4.4). Otomatis tersembunyi bila jendela < 1100 px. |
+| Status bar | 24 px | Status server MCP, sakelar workspace, penghitung pengaman putaran. Setiap item bisa diklik. |
+
+Ukuran jendela minimum 900 × 600. Pane minimum 40 kolom × 8 baris; split yang melanggar ditolak dengan pesan singkat.
+
+## 3. Pane
+
+### Header (28 px)
+Urutan: titik status + label status · id pane · agen · judul · folder (mono, dipendekkan dari tengah) · lencana relasi
+(`anak p1`) · chip `N pesan` bila ada pesan menunggu · tombol split kanan, split bawah, perbesar, tutup.
+
+| Status | Titik | Label |
+|---|---|---|
+| `starting` | lingkaran kosong | memulai |
+| `working` | setengah terisi, berdenyut (dimatikan oleh reduced motion) | bekerja |
+| `idle` | penuh hijau | siap |
+| `needs_you` | penuh amber + ikon `!` | butuh kamu |
+| `exited` | abu-abu bergaris | selesai (kode N) |
+| `unknown` | abu-abu kosong | tidak diketahui |
+
+Pane terfokus: garis tepi 1 px warna aksen; header pane lain memakai teks `muted`.
+
+### Badan
+xterm.js mengisi penuh. Font dan ukuran dari Settings. Tidak ada animasi di dalam terminal.
+
+### Keadaan khusus
+| Keadaan | Tampilan |
+|---|---|
+| Proses keluar | Pita di bawah pane: "Claude Code selesai (kode 0)" + tombol **Jalankan ulang** dan **Buka shell di sini**. Isi terminal tetap bisa digulir dan disalin. |
+| Gagal dijalankan | Badan pane berisi pesan galat (mis. "Tidak bisa menjalankan codex: izin ditolak") + **Coba lagi**. |
+| Pesan menunggu | Chip `1 pesan` di header; hover menampilkan pratinjau 3 baris; klik membuka panel Pesan pada pesan itu. |
+| Pesan sedang ditempel | Kilatan halus 150 ms di garis tepi pane (opacity saja). |
+
+### Menutup pane (SPN-04)
+`⌘W` atau tombol tutup. Bila proses masih berjalan: dialog kecil "Hentikan Codex di p2?" dengan **Hentikan** (destruktif)
+dan **Batal** (bawaan, terfokus). Pane yang punya anak hidup menyebutkan jumlah anak; anak tidak ikut ditutup.
+
+## 4. Permukaan lain
+
+### 4.1 Peluncur (tab baru, split, agen baru)
+Popover di tengah pane tujuan, dibuka `⌘T`, `⌘D`, `⌘⇧D`, atau `+`.
+- Pilihan: **Shell**, **Claude Code**, **Codex** (P1: agen dari katalog pengguna). Agen yang tidak terpasang tampil
+  redup dengan teks "Belum terpasang" dan tombol salin perintah pasang.
+- Folder: bawaan folder pane aktif; daftar 5 folder terakhir; tombol pilih folder (dialog native).
+- Tugas awal (opsional, hanya agen): textarea mono 4 baris.
+- `Enter` meluncurkan (di textarea: `⌘Enter`), `Esc` menutup. Panah atas/bawah memilih agen.
+
+### 4.2 Kartu persetujuan spawn (SPN-01)
+Muncul di bagian atas pane peminta, menutupi baris teratas terminal, **tanpa mengambil fokus**.
+
+```
+┌────────────────────────────────────────────────────────────────┐
+│ p1 · Claude Code ingin membuka agen                    1:47 ▁▁▁│
+│ Codex · "review: auth" · ~/dev/app                             │
+│ ┌────────────────────────────────────────────────────────────┐ │
+│ │ Review the diff on branch feat/auth for bugs. Do not edit… │ │
+│ │ (gulir, maks 8 baris, mono)                                │ │
+│ └────────────────────────────────────────────────────────────┘ │
+│                                    [Tolak]  [Izinkan ⌘↩]       │
+└────────────────────────────────────────────────────────────────┘
+```
+- Hitung mundur 120 detik sebagai teks dan bar tipis; habis = ditolak, kartu berubah menjadi "Kedaluwarsa" 3 detik lalu hilang.
+- Keyboard: `⌘J` memindahkan fokus ke kartu tertunda tertua; di kartu, `⌘Enter` mengizinkan, `Esc` menolak, `Tab`
+  berpindah tombol. Tanpa `⌘J`, ketikan tetap ke terminal.
+- Beberapa kartu bertumpuk, yang tertua di atas.
+- Bila jendela tidak fokus: notifikasi macOS "Claude Code (p1) ingin membuka Codex"; klik membawa ke kartu.
+- `role="alertdialog"`, judul dan isi diumumkan lewat `aria-live="polite"`.
+
+### 4.3 Pita pengaman putaran (MSG-04)
+Pita amber di atas workspace, di bawah tab bar:
+"Agen sudah saling mengirim 12 pesan tanpa masukanmu. Antrean dijeda." · **Lanjutkan** · **Hentikan dan buang antrean** · **Lihat log**.
+Tidak mengambil fokus; `⌘J` juga menjangkau pita ini.
+
+### 4.4 Panel Pesan (MSG-05)
+Daftar terbaru di bawah. Setiap baris:
+`14:09` (mono) · `p2 → p1` (chip id pane, tooltip nama agen dan judul) · status · baris pertama isi.
+
+| Status | Tampilan |
+|---|---|
+| `queued` | "menunggu" + lama menunggu |
+| `delivered` | "terkirim" |
+| `paused` | "dijeda" (amber) |
+| `dropped` | "dibuang" (merah) + alasan saat dibuka |
+
+- Klik baris: isi lengkap (mono, bisa dipilih), tombol **Salin**. Baris `queued`/`paused`: **Buang**; P1: **Kirim sekarang**.
+- Filter: Semua / Menunggu.
+- Kosong: "Belum ada pesan antar agen di workspace ini. Pesan muncul saat agen memakai pane_send."
+
+### 4.5 Status bar
+- `MCP aktif` (hijau) / `MCP mati` (merah, klik: alasan + **Coba lagi**). Port tidak ditampilkan.
+- `Agen membuka pane: aktif|mati`: klik membuka Settings › Kolaborasi.
+- `Saling kirim: aktif|mati`: klik langsung mengubah sakelar workspace (dengan konfirmasi saat menyalakan).
+- `Pesan antar agen n/12`: berubah amber di ≥ 75%.
+
+### 4.6 Settings (`⌘,`, jendela terpisah 640 × 520)
+| Bagian | Isi |
+|---|---|
+| Agen | Per agen: terdeteksi/tidak, path, versi; P1: metode login dari CLI dan peringatan `ANTHROPIC_API_KEY`; P1: path manual. |
+| Kolaborasi | Sakelar global "Agen boleh membuka pane" (bawaan mati); bawaan "Saling kirim" untuk workspace baru; angka batas dengan rentang dari MCP-TOOLS (stepper, nilai di luar rentang ditolak di tempat). |
+| Terminal | Font, ukuran, tinggi baris, scrollback, tema (Sistem/Gelap/Terang), mode pembaca layar xterm.js. |
+| Tentang | Versi, tautan ke docs, tombol buka folder log. |
+
+Perubahan tersimpan langsung; tidak ada tombol Simpan.
+
+### 4.7 Keadaan awal (tanpa tab)
+Di tengah jendela: judul "Mulai kerja", tiga tombol besar **Shell**, **Claude Code**, **Codex** dengan status terpasang,
+dua baris penjelasan ("Buka beberapa agen berdampingan. Agen bisa saling memberi tugas setelah kamu mengizinkannya di
+Settings."), dan tautan ke Settings › Kolaborasi.
+
+## 5. Galat dan umpan balik
+
+| Situasi | Di mana | Teks |
+|---|---|---|
+| Server MCP gagal mulai | Status bar merah + pita sekali | "Agen tidak bisa saling kirim: server lokal gagal mulai." **Coba lagi** · **Lihat log** |
+| CLI tidak ditemukan | Peluncur / badan pane | "codex tidak ditemukan di PATH." + perintah pasang yang bisa disalin |
+| Spawn ditolak karena sakelar mati | Toast 4 detik di pane peminta | "p1 meminta membuka pane, tapi fitur ini mati." **Settings** |
+| Spawn kena batas | Toast di pane peminta | "p1 mencapai batas 3 anak." |
+| Pesan dibuang | Panel Pesan (merah) | Alasan: "agen tujuan sudah keluar", "bracketed paste mati", "dibuang olehmu" |
+| Proses gagal dihentikan | Toast | "Codex di p2 tidak berhenti; dipaksa berhenti." |
+
+Toast: pojok kanan bawah jendela, maksimal 3, hilang 4 detik, bisa ditutup, `aria-live="polite"`, tidak mengambil fokus.
+
+## 6. Token desain
+Didefinisikan sebagai CSS variables di `src/styles/tokens.css`; komponen hanya memakai token, bukan hex. Kontras dihitung
+dengan rumus WCAG 2.x (2026-10-21).
+
+### Warna
+| Token | Gelap | Terang | Pakai |
+|---|---|---|---|
+| `--bg` | `#0E1116` | `#FFFFFF` | Latar terminal dan jendela |
+| `--surface` | `#151922` | `#F5F6F8` | Tab bar, header pane, panel, status bar |
+| `--raised` | `#1C212C` | `#FFFFFF` | Kartu, popover, toast |
+| `--line` | `#262C38` | `#D9DDE3` | Garis pemisah 1 px |
+| `--fg` | `#E6E9EF` | `#1A1D23` | Teks utama |
+| `--muted` | `#A1A9B8` | `#525A68` | Teks sekunder |
+| `--faint` | `#868FA0` | `#646C7A` | Label kecil, waktu |
+| `--accent` | `#5B9DFF` | `#1A63D4` | Fokus, aksi utama, status `working` |
+| `--ok` | `#3FB950` | `#1A7F37` | `idle`, terkirim |
+| `--warn` | `#D29922` | `#8A5C00` | `needs_you`, dijeda, pengaman putaran |
+| `--danger` | `#F26D6D` | `#CF222E` | Galat, dibuang, aksi destruktif |
+
+Kontras terendah tiap token teks terhadap `bg`/`surface`/`raised`:
+- Gelap: `fg` 13.3, `muted` 6.8, `faint` 4.95, `accent` 5.9, `ok` 6.3, `warn` 6.4, `danger` 5.5.
+- Terang: `fg` 15.6, `muted` 6.4, `faint` 4.9, `accent` 5.1, `ok` 4.7, `warn` 5.4, `danger` 4.95.
+
+Semua ≥ 4.5:1. Teks di tombol aksen: `--bg` di atas aksen gelap (6.9), putih di atas aksen terang (5.6). Warna status
+tidak pernah dipakai sendirian (§3 tabel status). Tema terminal (16 warna ANSI) terpisah dan bisa diatur; bawaannya
+mengikuti `--bg`/`--fg`.
+
+### Tipografi
+| Token | Nilai | Pakai |
+|---|---|---|
+| `--font-ui` | `-apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif` | Semua UI |
+| `--font-mono` | `"SF Mono", Menlo, monospace` | Terminal (bawaan, bisa diganti), id pane, waktu, path, isi pesan |
+| UI dasar | 13 px / 18 px | Ukuran standar aplikasi macOS |
+| Label | 11–12 px, mono untuk data | Header pane, status bar, waktu |
+| Judul | 13 px semibold | Judul kartu dan bagian Settings |
+| Terminal | 13 px, tinggi baris 1.2 | Bisa diatur 10–24 px |
+
+Font sistem saja: tidak ada font dari jaringan (prinsip "lokal saja") dan tidak ada berkas font yang perlu dibundel.
+Ukuran 13 px menyimpang dari saran web 16 px karena ini aplikasi desktop macOS yang padat; teks di bawah 11 px tidak dipakai.
+
+### Bentuk, jarak, gerak
+- Grid 4 px. Padding header 0 8 px; kartu 12 px; jarak antar kontrol 8 px.
+- Radius 4 px; kartu dan popover 8 px.
+- Lapisan dibedakan oleh warna permukaan dan garis `--line`. Bayangan hanya untuk kartu, popover, dan toast.
+- Gerak hanya `opacity` dan `transform`, 120–160 ms, `cubic-bezier(0.2, 0, 0, 1)`; keluar lebih cepat dari masuk.
+  `prefers-reduced-motion: reduce` mematikan semuanya, termasuk denyut status.
+- Ikon SVG satu set (mis. Lucide, dibundel lokal); tidak ada emoji sebagai ikon.
+
+## 7. Pintasan keyboard
+
+| Aksi | Pintasan |
+|---|---|
+| Tab baru (peluncur) | `⌘T` |
+| Split kanan / bawah (peluncur) | `⌘D` / `⌘⇧D` |
+| Tutup pane | `⌘W` |
+| Pindah fokus pane | `⌘⌥` + panah |
+| Pindah tab | `⌘1`–`⌘9`, `⌘⇧[` / `⌘⇧]` |
+| Perbesar / kembalikan pane | `⌘⇧Enter` |
+| Panel Pesan | `⌘⇧M` |
+| Ke kartu/pita tertunda | `⌘J` |
+| Izinkan / tolak (fokus di kartu) | `⌘Enter` / `Esc` |
+| Cari di pane | `⌘F` |
+| Ukuran font | `⌘=` / `⌘-` / `⌘0` |
+| Settings | `⌘,` |
+
+Semua pintasan memakai `⌘`, jadi tidak bentrok dengan `Ctrl`/`⌥` yang dipakai program di terminal. Saat fokus di
+terminal, `⌘C`/`⌘V` menyalin/menempel; tempelan orang memakai bracketed paste xterm.js seperti biasa.
+
+## 8. Aksesibilitas
+- Fokus terlihat (cincin 2 px `--accent`, offset 2 px) di setiap kontrol, termasuk dalam kartu dan popover.
+- Urutan Tab: tab bar → pane terfokus → panel Pesan → status bar.
+- Kartu `role="alertdialog"`; toast dan perubahan status penting diumumkan `aria-live="polite"`.
+- Tombol ikon punya `aria-label` dan tooltip ("Split kanan").
+- Opsi mode pembaca layar xterm.js di Settings › Terminal.
+- Target klik minimal 24 × 24 px (aplikasi desktop dengan pointer; header pane 28 px).
+
+## 9. Diperiksa sebelum setiap layar dianggap selesai
+- Tema gelap dan terang, keduanya dengan kontras token di atas.
+- Jendela 900 × 600 (minimum) dan 1440 × 900: tidak ada teks terpotong tanpa elipsis, tidak ada scroll horizontal di chrome.
+- Semua aksi bisa dilakukan tanpa mouse.
+- Kartu dan pesan masuk tidak memindahkan fokus saat mengetik di terminal.
+- Reduced motion: tidak ada gerakan.
+- Keadaan kosong, memuat, galat, dan berhasil ada untuk setiap fitur interaktif.
