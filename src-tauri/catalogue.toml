@@ -1,0 +1,40 @@
+# Katalog agen bawaan (PRD AGT-01, ARCHITECTURE §4). Disematkan ke binary lewat include_str! di catalogue.rs.
+#
+# - binary:    nama perintah yang dicari di PATH shell login. Dijalankan langsung dengan argv, tanpa shell (D-009).
+# - install:   perintah pasang untuk disalin pengguna; agentdeck tidak pernah menjalankannya (AGT-02).
+# - status:    osc7501_query = agen baru melapor setelah query `OSC 7501;?` dijawab (Claude, D-016);
+#              osc7501 = agen melapor tanpa query (Codex).
+# - mcp_args:  argv injeksi MCP. `{mcp_url}` diganti URL server lokal. Token tidak pernah masuk argv: agen membacanya
+#              dari env AGENTDECK_TOKEN (Claude mengekspansi `${VAR}` sendiri).
+# - task_args: harus diakhiri "--", "{task}" agar tugas yang diawali `-` tetap satu argumen (D-019).
+#
+# Flag bypass izin (--dangerously-*, --yolo, bypassPermissions, -a/-s, approval_policy, ...) ditolak saat parse
+# (AGENTS.md aturan 4).
+
+[[agents]]
+id = "claude-code"
+name = "Claude Code"
+binary = "claude"
+install = "curl -fsSL https://claude.ai/install.sh | bash"
+status = "osc7501_query"
+mcp_args = [
+  "--mcp-config",
+  '{"mcpServers":{"agentdeck":{"type":"http","url":"${AGENTDECK_MCP_URL}","headers":{"Authorization":"Bearer ${AGENTDECK_TOKEN}"}}}}',
+  "--allowedTools",
+  "mcp__agentdeck",
+]
+task_args = ["--", "{task}"]
+
+[[agents]]
+id = "codex"
+name = "Codex"
+binary = "codex"
+install = "npm install -g @openai/codex"
+status = "osc7501"
+mcp_args = [
+  "-c", 'mcp_servers.agentdeck.url="{mcp_url}"',
+  "-c", 'mcp_servers.agentdeck.bearer_token_env_var="AGENTDECK_TOKEN"',
+  "-c", 'mcp_servers.agentdeck.default_tools_approval_mode="approve"',
+  "-c", "mcp_servers.agentdeck.tool_timeout_sec=330",
+]
+task_args = ["--", "{task}"]

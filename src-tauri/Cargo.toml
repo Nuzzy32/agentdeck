@@ -18,6 +18,9 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 tauri = { version = "2", features = [] }
+# Katalog agen TOML (catalogue.rs). Keduanya sudah ada di pohon dependency Tauri; tidak menambah crate baru.
+serde = { version = "1", features = ["derive"] }
+toml = "1"
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
