@@ -26,6 +26,7 @@ Terakhir diperbarui: 2026-10-22. Baca ini dulu saat melanjutkan, lalu `docs/IMPL
 | T2.2 | Server MCP (`src-tauri/src/mcp/`): rmcp + axum di `127.0.0.1:0`, token lewat `tokens.rs`, `Origin` apa pun 403, `Host` asing 403, protokol 2026-07-28 dan 2025-06-18, `instructions`, tool sementara `whoami` | 4 tes integrasi HTTP; server dimulai di `setup`, galat start tidak mematikan aplikasi; `whoami` dihapus di T2.4 |
 | T2.4 (sebagian) | `screen.rs`: `vt100` per pane, `read(lines)` (alternate screen dibatasi tinggi layar), bracketed paste, `input_state` Empty/HasText/Unknown untuk Claude dan Codex | "HasText" hanya diuji dengan byte buatan (belum ada log nyata berisi ketikan); tool `pane_read` belum |
 | T2.7 (sebagian) | `delivery.rs`: sanitasi, batas 8192 byte, penanda ≤ 256 byte, urutan tempel + 150 ms + Enter, FIFO maks 5, syarat siap dengan jam palsu, dropped saat keluar | Logika murni; disambungkan ke PTY/MCP di T2.7 |
+| T1.8 | `PaneManager::close_all` paralel (batas 5 s) di `RunEvent::Exit` (jendela terakhir, ⌘Q, `app.exit`); `terminate` memotret keturunan pane (`proc_listchildpids`) lalu `SIGHUP`+`SIGTERM`, `SIGKILL` setelah 3 s ke grup dan setiap keturunan | Tes: 3 pane × 7 keturunan (job abaikan HUP/TERM, `setsid`, foreground) habis dalam satu masa tenggang; crash (helper di-`SIGKILL`) membersihkan shell + job biasa. Batasan saat crash: lihat ARCHITECTURE §12. Uji ⌘Q manual belum (UI membuat shell hanya lewat klik; sesi agen tanpa izin aksesibilitas) |
 | T1.6 | `catalogue.rs` + `catalogue.toml`: katalog claude-code/codex, `PATH` dari `$SHELL -l -i -c` dengan penanda, deteksi + versi, penolakan flag bypass, argv dengan `--` | Terdeteksi di mesin pemilik: claude 2.1.306, codex 0.163.0; belum disambungkan ke UI (T1.7) |
 
 ## S6 throughput: selesai (D-018)
@@ -36,7 +37,7 @@ tidak di-merge); boleh dihapus dengan `git branch -D spike/s6`.
 ## Berikutnya
 - T1.5: pohon split + workspace + pintasan (butuh T1.4).
 - T1.7: peluncur agen manual, menyambungkan `catalogue.rs` + `status.rs` ke thread baca `pty.rs` (butuh T1.5, T1.6).
-- T1.8: bersih-bersih saat aplikasi keluar.
+- T1.8 manual: `pnpm tauri dev`, klik mulai, jalankan `sleep 601 &` dan `claude`, ⌘Q, lalu `pgrep -fl "sleep 601|claude"`.
 - Phase 2 sisa: T2.3 (injeksi saat peluncuran), T2.4 tool `pane_list`/`pane_read`, T2.5 fake-agent, T2.6, T2.7 penyambungan, T2.8, T2.9.
 
 
@@ -56,4 +57,7 @@ tidak di-merge); boleh dihapus dengan `git branch -D spike/s6`.
 - T1.4: harness ukur S6 untuk aplikasi nyata tidak di-commit; ARCHITECTURE §12 baris T1.4 belum diperbarui (lihat D-020).
   `htop` tidak terpasang di mesin pemilik; diuji dengan `top`. Tampilan visual (WebGL) belum dilihat mata: sesi agen tidak
   punya izin tangkapan layar, pemeriksaan lewat isi buffer xterm.js.
+- T1.8: Bash tool Claude Code menjalankan tiap perintah di sesi sendiri (`ps` menampilkan `zsh -c ...` dengan `Ss`),
+  jadi `killpg` ke grup pane tidak menjangkaunya; karena itu `terminate` juga mengirim sinyal ke setiap keturunan.
+  Server MCP tidak dihentikan eksplisit saat keluar (socket tertutup bersama proses); `mcp/` di luar cakupan T1.8.
 - Commit tanpa atribusi AI (aturan global pemilik).
