@@ -1,6 +1,7 @@
 mod pty;
 pub mod policy;
 pub mod tokens;
+pub mod status;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() -> tauri::Result<()> {
