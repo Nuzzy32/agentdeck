@@ -20,6 +20,27 @@ async fn agents_list() -> Result<Vec<catalogue::AgentInfo>, String> {
         .map_err(|e| e.to_string())
 }
 
+/// Settings → Agen (T4.4/T4.5): the list plus manual path, login method from the CLI's own status command, and the
+/// names (never values) of API key variables in the login shell. Runs login shell and CLI probes, so off the runtime.
+#[tauri::command]
+async fn agents_info() -> Result<Vec<catalogue::AgentDetails>, String> {
+    tauri::async_runtime::spawn_blocking(catalogue::agents_info)
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())
+}
+
+/// Sets (`path`) or clears (`null`) an agent's manual CLI path (SET-03); the path must be absolute and executable.
+#[tauri::command]
+async fn agent_set_path(
+    id: String,
+    path: Option<String>,
+) -> Result<catalogue::AgentDetails, String> {
+    tauri::async_runtime::spawn_blocking(move || catalogue::agent_set_path(&id, path.as_deref()))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
 /// Workspace id from the UI: the messaging contract sends it as a string; a number is accepted too.
 #[derive(serde::Deserialize)]
 #[serde(untagged)]
@@ -132,6 +153,7 @@ pub fn run() -> tauri::Result<()> {
             // Without a data dir messages still flow, only unlogged.
             let store = match app.path().app_data_dir() {
                 Ok(dir) => {
+                    catalogue::set_data_dir(dir.clone());
                     let store = store::Store::new(&dir);
                     if let Err(e) = store.prune(std::time::SystemTime::now()) {
                         eprintln!("agentdeck: old logs not pruned: {e}");
@@ -176,6 +198,8 @@ pub fn run() -> tauri::Result<()> {
             panes::workspace_create,
             panes::workspace_close,
             agents_list,
+            agents_info,
+            agent_set_path,
             pty::pane_attach,
             pty::pane_detach,
             pty::pane_write,

@@ -6,7 +6,7 @@ use std::fmt;
 
 use serde::Serialize;
 
-use crate::catalogue::{self, Catalogue};
+use crate::catalogue::{self, Catalogue, StatusSource};
 use crate::tokens::Token;
 
 /// Satu-satunya variabel yang diambil dari environment agentdeck (D-014, D-019). `PATH` datang dari shell login.
@@ -99,8 +99,9 @@ pub fn shell(env: Vec<(String, OsString)>) -> Launch {
     }
 }
 
-/// Agen dari katalog: biner dicari di `PATH` env itu sendiri, tugas setelah `--` sebagai satu argumen. Dengan `mcp`,
-/// argv templat katalog (`{mcp_url}`) dan env `AGENTDECK_*` ditambahkan; tanpa itu (server MCP mati) agen jalan polos.
+/// Agen dari katalog: path manual bila diisi, selain itu biner dicari di `PATH` env itu sendiri; tugas setelah `--`
+/// sebagai satu argumen. Dengan `mcp`, argv templat katalog (`{mcp_url}`) dan env `AGENTDECK_*` ditambahkan; tanpa itu
+/// (server MCP mati) atau tanpa templat (agen pengguna) agen jalan polos dan tidak menerima token.
 pub fn agent(
     cat: &Catalogue,
     id: &str,
@@ -116,15 +117,16 @@ pub fn agent(
         .find(|(k, _)| k == "PATH")
         .and_then(|(_, v)| v.to_str())
         .unwrap_or_default();
-    let found =
-        catalogue::find_in_path(&agent.binary, path).and_then(|p| p.to_str().map(str::to_owned));
-    let Some(program) = found else {
-        return Err(LaunchError {
-            message: format!("{} tidak ditemukan di PATH.", agent.binary),
-            install: Some(agent.install.clone()),
-        });
-    };
-    let mut argv = vec![program];
+    let program = catalogue::resolve(agent, path).map_err(|message| LaunchError {
+        message,
+        // Path manual yang salah diperbaiki di Settings, bukan dengan memasang ulang.
+        install: agent.path_override.is_none().then(|| agent.install.clone()),
+    })?;
+    let program = program
+        .to_str()
+        .ok_or_else(|| LaunchError::new("Path agen bukan UTF-8."))?;
+    let mcp = mcp.filter(|_| !agent.mcp_args.is_empty());
+    let mut argv = vec![program.to_owned()];
     argv.extend(agent.build_args(mcp.as_ref().map(|m| m.url), task));
     if let Some(m) = mcp {
         env.push(("AGENTDECK_MCP_URL".into(), m.url.into()));
@@ -134,7 +136,7 @@ pub fn agent(
     Ok(Launch {
         argv,
         env,
-        osc_status: true,
+        osc_status: agent.status != StatusSource::None,
     })
 }
 
@@ -219,7 +221,7 @@ mod tests {
     fn agent_argv_runs_binary_directly_with_task_after_double_dash() {
         let dir = bin_dir(&["claude", "codex"]);
         let path = format!("/nonexistent:{}", dir.display());
-        let cat = Catalogue::builtin().unwrap();
+        let cat = Catalogue::embedded().unwrap();
         for (id, bin) in [("claude-code", "claude"), ("codex", "codex")] {
             let task = "--dangerously-skip-permissions; rm -rf ~ $(x)";
             let l = agent(&cat, id, Some(task), env(polluted, &path), None).unwrap();
@@ -243,7 +245,7 @@ mod tests {
     fn mcp_injection_puts_token_in_env_only() {
         let dir = bin_dir(&["claude", "codex"]);
         let path = dir.display().to_string();
-        let cat = Catalogue::builtin().unwrap();
+        let cat = Catalogue::embedded().unwrap();
         let token = Token::generate().unwrap();
         let url = "http://127.0.0.1:4321/mcp";
         let mcp = || {
@@ -296,11 +298,53 @@ mod tests {
 
     #[test]
     fn missing_binary_reports_install_command() {
-        let cat = Catalogue::builtin().unwrap();
+        let cat = Catalogue::embedded().unwrap();
         let err = agent(&cat, "codex", None, env(polluted, "/nonexistent"), None).unwrap_err();
         assert_eq!(err.message, "codex tidak ditemukan di PATH.");
         assert_eq!(err.install.as_deref(), Some("npm install -g @openai/codex"));
         assert!(agent(&cat, "nope", None, vec![], None).is_err());
+    }
+
+    #[test]
+    fn manual_path_wins_over_path_and_must_stay_valid() {
+        let dir = bin_dir(&["my-claude", "claude"]);
+        let mut cat = Catalogue::embedded().unwrap();
+        let manual = dir.join("my-claude");
+        cat.agents[0].path_override = Some(manual.clone());
+        let path = dir.display().to_string();
+        let l = agent(&cat, "claude-code", Some("hi"), env(polluted, &path), None).unwrap();
+        assert_eq!(l.argv, [manual.to_str().unwrap(), "--", "hi"]);
+
+        // A stale manual path is an error to fix in Settings, never a silent fall back to `claude` on PATH.
+        cat.agents[0].path_override = Some(dir.join("gone"));
+        let err = agent(&cat, "claude-code", None, env(polluted, &path), None).unwrap_err();
+        assert!(err.message.contains("Path manual"), "{}", err.message);
+        assert_eq!(err.install, None);
+    }
+
+    /// A user agent with no MCP template runs plain: no MCP argv, no `AGENTDECK_*` env, so no token leaves agentdeck;
+    /// `status = "none"` turns OSC scanning off.
+    #[test]
+    fn user_agent_without_mcp_template_gets_no_token() {
+        let dir = bin_dir(&["gemini"]);
+        let mut cat = Catalogue::embedded().unwrap();
+        let mut gemini = cat.agents[0].clone();
+        gemini.id = "gemini".into();
+        gemini.binary = "gemini".into();
+        gemini.mcp_args.clear();
+        gemini.status = StatusSource::None;
+        cat.agents.push(gemini);
+        let token = Token::generate().unwrap();
+        let mcp = Mcp {
+            url: "http://127.0.0.1:1/mcp",
+            token: &token,
+            pane: "p1",
+        };
+        let path = dir.display().to_string();
+        let l = agent(&cat, "gemini", Some("x"), env(polluted, &path), Some(mcp)).unwrap();
+        assert_eq!(l.argv[1..], ["--", "x"]);
+        assert!(!l.env.iter().any(|(k, _)| k.starts_with("AGENTDECK_")));
+        assert!(!l.osc_status);
     }
 
     #[test]
