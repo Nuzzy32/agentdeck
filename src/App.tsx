@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { homeDir } from "@tauri-apps/api/path";
+import { createCollab, EMPTY, pendingByPane, tauriClient } from "./core/messages";
 import "./layout/layout.css";
 import { FONT, nextFontSize, shortcut } from "./layout/keys";
 import { MESSAGES_BREAKPOINT, panelOpen, type PanelOverride, SIDEBAR_BREAKPOINT, togglePanel } from "./layout/logic";
@@ -21,7 +22,9 @@ import { PaneView } from "./layout/Pane";
 import {
   CloseDialog,
   EmptyState,
+  LoopRibbon,
   MessagesPanel,
+  PeerDialog,
   Sidebar,
   StatusBar,
   TitleBar,
@@ -104,6 +107,11 @@ function App() {
   const area = useRef<Rect | null>(null);
   // Pane and workspace ids come from the core (`pane_create`, `workspace_create`).
   const ids = useRef({ toast: 1, spawn: 1 });
+  // Messages, loop guard and "Saling kirim" per workspace, kept by the core (T2.8, T2.9).
+  const [collab] = useState(() => createCollab(tauriClient));
+  // Resolves the "Saling kirim" confirmation while it is open.
+  const [peerAsk, setPeerAsk] = useState<((ok: boolean) => void) | null>(null);
+  const ribbonButton = useRef<HTMLButtonElement>(null);
   // One pane creation at a time: a held ⌘D must not spawn shells against a layout that is about to change.
   const creating = useRef(false);
 
@@ -115,6 +123,16 @@ function App() {
     void refreshAgents();
   }, []);
 
+  useEffect(() => collab.start(), [collab]);
+  // The core names workspaces by its own number; its message and loop guard commands take it as a string.
+  const wsKey = activeId === null ? null : String(activeId);
+  useEffect(() => {
+    if (wsKey !== null) void collab.load(wsKey);
+  }, [collab, wsKey]);
+  const shared = useSyncExternalStore(collab.subscribe, () => (wsKey === null ? EMPTY : collab.get(wsKey)));
+  const pending = pendingByPane(shared.messages);
+  const withPending = (p: Pane): Pane => ({ ...p, pending: pending[p.id] ?? 0 });
+
   const active = workspaces.find((ws) => ws.id === activeId) ?? null;
   const cell = useMemo(() => measureCell(fontSize), [fontSize]);
   const sidebarOpen = panelOpen(width, SIDEBAR_BREAKPOINT, sidebar);
@@ -125,7 +143,8 @@ function App() {
     id: ws.id,
     name: ws.name,
     folder: tilde(ws.folder),
-    panes: leaves(ws.tree).flatMap((id) => panes[id] ?? []),
+    // Only the active workspace's messages are loaded, and only its panes are shown.
+    panes: leaves(ws.tree).flatMap((id) => (panes[id] ? [ws.id === activeId ? withPending(panes[id]) : panes[id]] : [])),
   }));
   const activeView = views.find((v) => v.id === activeId) ?? null;
 
@@ -367,11 +386,25 @@ function App() {
 
   const toggleSidebar = () => setSidebar(togglePanel(width, SIDEBAR_BREAKPOINT, sidebar));
   const toggleMessages = () => setMessages(togglePanel(width, MESSAGES_BREAKPOINT, messages));
+  const showMessages = () => setMessages({ open: true, wide: width >= MESSAGES_BREAKPOINT });
+
+  /** Loop guard, discard and peer actions: a refusal (or a command the core lacks) becomes a toast. */
+  const act = (what: string, p: Promise<void>) => p.catch((e: unknown) => toast(`${what}: ${String(e)}`));
+
+  const requestPeer = (on: boolean) => {
+    if (wsKey === null) return;
+    const confirm = () => new Promise<boolean>((resolve) => setPeerAsk(() => resolve));
+    void act("Sakelar saling kirim tidak bisa diubah", collab.requestPeer(wsKey, on, confirm));
+  };
+  const answerPeer = (ok: boolean) => {
+    peerAsk?.(ok);
+    setPeerAsk(null);
+  };
 
   useEffect(() => {
     // Capture phase, so a shortcut never reaches xterm.js; unmapped keys (⌘C, ⌘V, Ctrl, ⌥) pass through untouched.
     const onKey = (e: KeyboardEvent) => {
-      if (closing !== null || launcher !== null) return;
+      if (closing !== null || launcher !== null || peerAsk !== null) return;
       const action = shortcut(e);
       if (!action) return;
       e.preventDefault();
@@ -395,6 +428,8 @@ function App() {
           return toggleSidebar();
         case "messages":
           return toggleMessages();
+        case "jump":
+          return ribbonButton.current?.focus();
         case "font":
           return setFontSize((size) => nextFontSize(size, action.delta));
       }
@@ -426,52 +461,75 @@ function App() {
           />
         ) : null}
         <main className="workspace">
-          {active ? (
-            // Keyed by workspace: switching unmounts the other workspace's panes, which detaches (not closes) them;
-            // coming back attaches again and the core replays their buffer.
-            <SplitView
-              key={active.id}
-              tree={active.tree}
-              zoomed={active.zoomed}
-              cell={cell}
-              onSize={(r) => {
-                area.current = r;
-              }}
-              onRatio={(path, ratio) => updateWs(active.id, (w) => ({ ...w, tree: setRatio(w.tree, path, ratio) }))}
-              renderPane={(id) => {
-                const pane = panes[id];
-                return pane ? (
-                  <PaneView
-                    pane={pane}
-                    focused={id === active.focused}
-                    zoomed={id === active.zoomed}
-                    fontSize={fontSize}
-                    actions={{
-                      onFocus: () => focusPane(id),
-                      onSplit: (dir) => splitPane(dir, id),
-                      onZoom: () => toggleZoom(id),
-                      onClose: () => requestClose(id),
-                      onActivity: (busy) => setActivity(id, busy),
-                      onRestart: () => restart(id, false),
-                      onShellHere: () => restart(id, true),
-                    }}
-                  />
-                ) : null;
-              }}
-            />
+          {active && wsKey !== null ? (
+            <>
+              <LoopRibbon
+                guard={shared.guard}
+                focusRef={ribbonButton}
+                onContinue={() => void act("Antrean tidak bisa dilanjutkan", collab.continueLoop(wsKey))}
+                onStop={() => void act("Antrean tidak bisa dihentikan", collab.stopLoop(wsKey))}
+                onShowLog={showMessages}
+              />
+              {/* Keyed by workspace: switching unmounts the other workspace's panes, which detaches (not closes)
+                  them; coming back attaches again and the core replays their buffer. */}
+              <SplitView
+                key={active.id}
+                tree={active.tree}
+                zoomed={active.zoomed}
+                cell={cell}
+                onSize={(r) => {
+                  area.current = r;
+                }}
+                onRatio={(path, ratio) => updateWs(active.id, (w) => ({ ...w, tree: setRatio(w.tree, path, ratio) }))}
+                renderPane={(id) => {
+                  const pane = panes[id];
+                  return pane ? (
+                    <PaneView
+                      pane={withPending(pane)}
+                      focused={id === active.focused}
+                      zoomed={id === active.zoomed}
+                      fontSize={fontSize}
+                      actions={{
+                        onFocus: () => focusPane(id),
+                        onSplit: (dir) => splitPane(dir, id),
+                        onZoom: () => toggleZoom(id),
+                        onClose: () => requestClose(id),
+                        onActivity: (busy) => setActivity(id, busy),
+                        onRestart: () => restart(id, false),
+                        onShellHere: () => restart(id, true),
+                      }}
+                    />
+                  ) : null;
+                }}
+              />
+            </>
           ) : (
             <EmptyState agents={agents} onStart={newWorkspace} />
           )}
         </main>
-        {activeView && messagesOpen ? <MessagesPanel workspace={activeView} messages={[]} /> : null}
+        {activeView && wsKey !== null && messagesOpen ? (
+          <MessagesPanel
+            workspace={activeView}
+            messages={shared.messages}
+            onDiscard={(id) => void act("Pesan tidak bisa dibuang", collab.drop(wsKey, id))}
+          />
+        ) : null}
       </div>
-      <StatusBar loopCount={0} />
+      <StatusBar guard={shared.guard} peer={wsKey === null ? null : shared.peer} onPeer={requestPeer} />
       {closingPane ? (
         <CloseDialog
           pane={closingPane}
           childCount={Object.values(panes).filter((p) => p.parent === closingPane.id).length}
           onConfirm={() => closePane(closingPane.id)}
           onCancel={() => setClosing(null)}
+        />
+      ) : null}
+      {peerAsk && activeView ? (
+        <PeerDialog
+          workspace={activeView.name}
+          limit={shared.guard.limit}
+          onConfirm={() => answerPeer(true)}
+          onCancel={() => answerPeer(false)}
         />
       ) : null}
       {launcher ? (

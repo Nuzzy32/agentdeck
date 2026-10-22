@@ -460,6 +460,31 @@
   color: var(--faint);
 }
 
+/* Loop guard ribbon, UI-UX §4.3: amber, above the panes, below the title bar. */
+.loop-ribbon {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+  min-height: 32px;
+  padding: 4px 8px;
+  background: color-mix(in srgb, var(--warn) 14%, var(--surface));
+  border-bottom: 1px solid var(--warn);
+  color: var(--fg);
+  font-size: var(--text-label-lg);
+}
+.loop-ribbon > svg {
+  flex: none;
+  color: var(--warn);
+}
+.loop-ribbon-text {
+  flex: 1;
+  min-width: 0;
+}
+.loop-ribbon .btn {
+  flex: none;
+}
+
 /* Status bar */
 .statusbar {
   display: flex;
