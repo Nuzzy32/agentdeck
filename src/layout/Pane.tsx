@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
 import { TerminalPane } from "../pane/TerminalPane";
 import { Icon, IconButton } from "./Icon";
 import { splitMiddle } from "./logic";
@@ -54,12 +54,15 @@ export function PaneView({
   zoomed,
   fontSize,
   actions,
+  cards,
 }: {
   pane: Pane;
   focused: boolean;
   zoomed: boolean;
   fontSize: number;
   actions: PaneActions;
+  /** Spawn approval cards this pane asked for (UI-UX §4.2), shown over the top of its terminal. */
+  cards?: ReactNode;
 }) {
   const label = statusLabel(pane);
   const { head, tail } = splitMiddle(pane.folder);
@@ -107,6 +110,7 @@ export function PaneView({
           <IconButton icon="x" label="Tutup pane (⌘W)" onClick={actions.onClose} />
         </span>
       </header>
+      {cards}
       {pane.failed ? (
         <div className="pane-body pane-failed" role="alert">
           <p className="pane-failed-text">{pane.failed.message}</p>

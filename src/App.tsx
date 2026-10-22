@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { homeDir } from "@tauri-apps/api/path";
+import { flushSync } from "react-dom";
+import { nextJump } from "./cards/approvals";
+import { ApprovalStack, useApprovals } from "./cards/Cards";
 import { createCollab, EMPTY, pendingByPane, tauriClient } from "./core/messages";
 import "./layout/layout.css";
 import { FONT, nextFontSize, shortcut } from "./layout/keys";
@@ -114,6 +117,8 @@ function App() {
   const ribbonButton = useRef<HTMLButtonElement>(null);
   // One pane creation at a time: a held ⌘D must not spawn shells against a layout that is about to change.
   const creating = useRef(false);
+  // Spawn approval cards (T3.1), shown above the pane that asked.
+  const approvals = useApprovals();
 
   const refreshAgents = () =>
     invoke<AgentInfo[]>("agents_list").then(setAgents, (e: unknown) => toast(`Daftar agen tidak terbaca: ${String(e)}`));
@@ -401,6 +406,28 @@ function App() {
     setPeerAsk(null);
   };
 
+  /** ⌘J (UI-UX §4.2): the oldest pending card, then newer ones, then the loop guard ribbon; never without ⌘J. */
+  const jump = () => {
+    const at = document.activeElement;
+    const current =
+      at?.closest("[data-approval]")?.getAttribute("data-approval") ?? (at?.closest(".loop-ribbon") ? "ribbon" : null);
+    const next = nextJump(
+      approvals.cards.filter((c) => panes[c.pane]),
+      ribbonButton.current !== null,
+      current,
+    );
+    if (next === "ribbon") return ribbonButton.current?.focus();
+    const pane = approvals.cards.find((c) => c.id === next)?.pane;
+    const ws = pane && workspaces.find((w) => leaves(w.tree).includes(pane));
+    if (!next || !pane || !ws) return;
+    // Show the card first: its workspace becomes active and a zoom on another pane ends.
+    flushSync(() => {
+      setActiveId(ws.id);
+      updateWs(ws.id, (w) => (w.zoomed !== null && w.zoomed !== pane ? { ...w, zoomed: null } : w));
+    });
+    document.querySelector<HTMLElement>(`[data-approval="${CSS.escape(next)}"]`)?.focus();
+  };
+
   useEffect(() => {
     // Capture phase, so a shortcut never reaches xterm.js; unmapped keys (⌘C, ⌘V, Ctrl, ⌥) pass through untouched.
     const onKey = (e: KeyboardEvent) => {
@@ -429,7 +456,7 @@ function App() {
         case "messages":
           return toggleMessages();
         case "jump":
-          return ribbonButton.current?.focus();
+          return jump();
         case "font":
           return setFontSize((size) => nextFontSize(size, action.delta));
       }
@@ -498,6 +525,13 @@ function App() {
                         onRestart: () => restart(id, false),
                         onShellHere: () => restart(id, true),
                       }}
+                      cards={
+                        <ApprovalStack
+                          cards={approvals.cards.filter((c) => c.pane === id)}
+                          folder={tilde}
+                          onAnswer={approvals.answer}
+                        />
+                      }
                     />
                   ) : null;
                 }}
