@@ -1,6 +1,8 @@
 //! T2.2: the MCP server over real HTTP. Auth/Origin/Host rejections, then `whoami` under both protocol versions.
+//! T2.3: tokens come from the pane registry; a closed pane's token is refused.
 
-use agentdeck_lib::mcp::server::{self, INSTRUCTIONS, Tokens};
+use agentdeck_lib::mcp::server::{self, INSTRUCTIONS};
+use agentdeck_lib::panes::{self, Panes, Spec};
 use reqwest::{Client, Response, StatusCode};
 use serde_json::{Value, json};
 
@@ -10,16 +12,33 @@ struct Fixture {
     p2: String,
 }
 
+/// A registered agent pane with no process: enough for the server, which only maps tokens.
+pub fn agent(workspace: u32) -> Spec {
+    Spec {
+        workspace,
+        pane: None,
+        agent: Some("codex".into()),
+        title: "t".into(),
+        cwd: "/".into(),
+        task: None,
+        rows: 24,
+        cols: 80,
+    }
+}
+
 async fn fixture() -> Fixture {
-    let tokens = Tokens::default();
+    let panes = Panes::default();
     let (p1, p2) = {
-        let mut reg = tokens.write().unwrap();
-        (
-            reg.issue("p1").unwrap().expose().to_owned(),
-            reg.issue("p2").unwrap().expose().to_owned(),
-        )
+        let mut reg = panes::lock(&panes);
+        let ws = reg.create_workspace();
+        let mut open = |want: &str| {
+            let o = reg.open(&agent(ws)).unwrap();
+            assert_eq!(o.id, want);
+            o.token.unwrap().expose().to_owned()
+        };
+        (open("p1"), open("p2"))
     };
-    let port = server::start(tokens).await.unwrap();
+    let port = server::start(panes).await.unwrap();
     Fixture {
         url: format!("http://127.0.0.1:{port}/mcp"),
         p1,
@@ -209,4 +228,30 @@ async fn stateless_2026_07_28() {
         .unwrap())
     .await;
     assert_eq!(msg["result"]["instructions"], INSTRUCTIONS, "{msg}");
+}
+
+/// T2.3: closing a pane revokes its token at once; the other pane keeps working.
+#[tokio::test]
+async fn closed_pane_token_is_refused() {
+    let panes = Panes::default();
+    let (t1, t2) = {
+        let mut reg = panes::lock(&panes);
+        let ws = reg.create_workspace();
+        let t1 = reg.open(&agent(ws)).unwrap().token.unwrap();
+        let t2 = reg.open(&agent(ws)).unwrap().token.unwrap();
+        (t1.expose().to_owned(), t2.expose().to_owned())
+    };
+    let url = format!(
+        "http://127.0.0.1:{}/mcp",
+        server::start(panes.clone()).await.unwrap()
+    );
+    let body = init("2025-06-18");
+    let status = |t: &str| {
+        let req = post(&url, Some(t), &[], &body);
+        async move { req.send().await.unwrap().status() }
+    };
+    assert_eq!(status(&t1).await, StatusCode::OK);
+    panes::lock(&panes).close("p1");
+    assert_eq!(status(&t1).await, StatusCode::UNAUTHORIZED);
+    assert_eq!(status(&t2).await, StatusCode::OK);
 }

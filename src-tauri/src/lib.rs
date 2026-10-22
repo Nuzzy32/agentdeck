@@ -2,6 +2,7 @@ pub mod catalogue;
 pub mod delivery;
 pub mod launch;
 pub mod mcp;
+pub mod panes;
 pub mod policy;
 pub mod pty;
 pub mod screen;
@@ -29,9 +30,9 @@ pub fn run() -> tauri::Result<()> {
             std::thread::spawn(|| {
                 catalogue::login_path();
             });
-            let tokens = mcp::server::Tokens::default();
-            // A failed start leaves the app usable; the status bar shows "MCP mati".
-            let status = match tauri::async_runtime::block_on(mcp::server::start(tokens.clone())) {
+            let panes = panes::Panes::default();
+            // A failed start leaves the app usable (agents run without MCP); the status bar shows "MCP mati".
+            let status = match tauri::async_runtime::block_on(mcp::server::start(panes.clone())) {
                 Ok(port) => mcp::server::McpStatus::Running { port },
                 Err(e) => {
                     eprintln!("agentdeck: MCP server not started: {e}");
@@ -40,19 +41,21 @@ pub fn run() -> tauri::Result<()> {
                     }
                 }
             };
-            app.manage(tokens);
+            app.manage(panes);
             app.manage(status);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            pty::pane_create,
+            panes::pane_create,
+            panes::pane_close,
+            panes::workspace_create,
+            panes::workspace_close,
             agents_list,
             pty::pane_attach,
             pty::pane_detach,
             pty::pane_write,
             pty::pane_resize,
             pty::pane_ack,
-            pty::pane_close,
         ])
         .build(tauri::generate_context!())?
         .run(|app, event| {

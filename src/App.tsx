@@ -102,7 +102,8 @@ function App() {
   const [choice, setChoice] = useState(SHELL);
   const [recents, setRecents] = useState(loadRecents);
   const area = useRef<Rect | null>(null);
-  const ids = useRef({ pane: 1, ws: 1, toast: 1, spawn: 1 });
+  // Pane and workspace ids come from the core (`pane_create`, `workspace_create`).
+  const ids = useRef({ toast: 1, spawn: 1 });
   // One pane creation at a time: a held ⌘D must not spawn shells against a layout that is about to change.
   const creating = useRef(false);
 
@@ -139,7 +140,13 @@ function App() {
 
   // The PTY is created here, in an event handler, not in a TerminalPane effect that StrictMode would run twice.
   // Events are routed by pane id and spawn number, so a restarted pane ignores whatever its old process still sends.
-  const startPty = async (base: Pane, task: string): Promise<LaunchError | null> => {
+  // The core gives the pane id (a restart keeps `base.id`); events that beat the reply (fast exit) are held until then.
+  const startPty = async (
+    base: Pane,
+    task: string,
+    workspace: number,
+    restart: boolean,
+  ): Promise<{ id: string } | { error: LaunchError }> => {
     const spawn = ids.current.spawn++;
     const pane: Pane = {
       ...base,
@@ -154,34 +161,42 @@ function App() {
       exitCode: undefined,
       failed: undefined,
     };
+    let id: string | null = null;
+    const early: PaneEvent[] = [];
     const update = (fn: (p: Pane) => Pane) =>
       setPanes((all) => {
-        const p = all[pane.id];
-        return p?.spawn === spawn ? { ...all, [pane.id]: fn(p) } : all;
+        const p = id === null ? undefined : all[id];
+        return id !== null && p?.spawn === spawn ? { ...all, [id]: fn(p) } : all;
       });
-    // In state before the invoke, so an event that beats the reply (fast exit) still lands.
-    setPanes((all) => ({ ...all, [pane.id]: pane }));
     const ch = new Channel<PaneEvent>();
-    ch.onmessage = (ev) => update((p) => applyEvent(p, ev));
+    ch.onmessage = (ev) => (id === null ? early.push(ev) : update((p) => applyEvent(p, ev)));
     try {
-      const ptyId = await invoke<number>("pane_create", {
-        agent: pane.agentId,
-        cwd: pane.cwd,
-        task: task || null,
-        rows: 24,
-        cols: 80,
+      const started = await invoke<{ pane: string; pty: number }>("pane_create", {
+        spec: {
+          workspace,
+          pane: restart ? base.id : null,
+          agent: pane.agentId,
+          title: pane.title,
+          cwd: pane.cwd,
+          task: task || null,
+          rows: 24,
+          cols: 80,
+        },
         onEvent: ch,
       });
-      update((p) => ({ ...p, ptyId }));
+      id = started.pane;
+      const ready = early.reduce(applyEvent, { ...pane, id: started.pane, ptyId: started.pty });
+      setPanes((all) => ({ ...all, [started.pane]: ready }));
       // An agent that never reports leaves `starting` for the output heuristic.
       if (pane.agentId) {
         setTimeout(() => update((p) => (p.status === "starting" ? applyActivity(p, false, Date.now()) : p)), STARTING_MS);
       }
-      return null;
+      return { id: started.pane };
     } catch (e) {
       const failed = toLaunchError(e);
-      update((p) => ({ ...p, failed }));
-      return failed;
+      // A failed restart stays as a failed pane; a new pane never appears.
+      if (restart) setPanes((all) => ({ ...all, [base.id]: { ...pane, failed } }));
+      return { error: failed };
     }
   };
 
@@ -194,11 +209,15 @@ function App() {
     creating.current = true;
     try {
       const agentId = pick === SHELL ? null : pick;
-      const n = ids.current.pane++;
-      const id = `p${n}`;
-      const err = await startPty(
+      let ws: number;
+      try {
+        ws = target.kind === "workspace" ? await invoke<number>("workspace_create") : target.ws;
+      } catch (e) {
+        return toLaunchError(e);
+      }
+      const res = await startPty(
         {
-          id,
+          id: "",
           agentId,
           agent: agentName(agentId),
           title: paneTitle(agentId ? task : "", cwd),
@@ -212,15 +231,16 @@ function App() {
           spawn: 0,
         },
         task,
+        ws,
+        false,
       );
-      if (err) {
-        setPanes(({ [id]: _, ...others }) => others);
-        // Nothing else creates panes meanwhile (`creating`), so the id can be reused.
-        if (ids.current.pane === n + 1) ids.current.pane = n;
-        return err;
+      if ("error" in res) {
+        if (target.kind === "workspace") invoke("workspace_close", { id: ws }).catch(() => undefined);
+        return res.error;
       }
+      const { id } = res;
       if (target.kind === "workspace") {
-        const wsId = ids.current.ws++;
+        const wsId = ws;
         setWorkspaces((list) => {
           const base = basename(cwd);
           let name = base;
@@ -268,10 +288,11 @@ function App() {
   /** Exited or failed pane: the same program again (without the first task), or a shell in its folder. */
   const restart = (id: string, asShell: boolean) => {
     const pane = panes[id];
-    if (!pane) return;
-    const old = pane.ptyId;
-    if (old !== null) serial(old, () => invoke("pane_close", { id: old })).catch(() => undefined);
-    void startPty(asShell ? { ...pane, agentId: null, agent: "Shell", title: basename(pane.cwd) } : pane, "");
+    const ws = workspaces.find((w) => leaves(w.tree).includes(id));
+    if (!pane || !ws) return;
+    // The core stops the old process itself when it starts the new one in the same pane.
+    const base = asShell ? { ...pane, agentId: null, agent: "Shell", title: basename(pane.cwd) } : pane;
+    void startPty(base, "", ws.id, true);
   };
 
   const setActivity = (id: string, busy: boolean) =>
@@ -298,11 +319,13 @@ function App() {
       const rest = workspaces.filter((w) => w !== ws);
       setWorkspaces(rest);
       if (activeId === ws.id) setActiveId(rest[Math.min(i, rest.length - 1)]?.id ?? null);
+      invoke("workspace_close", { id: ws.id }).catch(() => undefined);
     }
     setPanes(({ [id]: _, ...others }) => others);
+    // Also for a failed pane: the core forgets it and revokes its token. After pending writes to its PTY, if any.
+    const close = () => invoke("pane_close", { pane: id });
     const ptyId = pane.ptyId;
-    if (ptyId === null) return;
-    serial(ptyId, () => invoke("pane_close", { id: ptyId })).catch((e: unknown) =>
+    (ptyId === null ? close() : serial(ptyId, close)).catch((e: unknown) =>
       toast(`${pane.agent} di ${pane.id} tidak bisa dihentikan: ${String(e)}`),
     );
   };

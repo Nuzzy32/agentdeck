@@ -309,7 +309,7 @@ dianggap selesai.
 
 | Klaim | Task |
 |---|---|
-| Tugas awal sampai 16 KB lewat argv diterima utuh oleh kedua CLI (S1 hanya menguji tempelan, S2/S3 tanpa prompt). | T2.3 |
+| ~~Tugas awal sampai 16 KB lewat argv diterima utuh oleh kedua CLI.~~ **Terbukti T2.3 (2026-10-22):** tugas tepat 16384 byte yang diawali `-`, diluncurkan lewat `panes::start` (argv + injeksi MCP sungguhan), dikerjakan Claude Code 2.1.308 dan Codex 0.163.0: keduanya memanggil `whoami` agentdeck tanpa prompt izin (hasil `p2`) dan mengutip baris terakhir tugas. | T2.3 |
 | Kotak input kosong bisa dideteksi dari `vt100`; teks lama atau saran samar Claude tidak ikut terkirim (§5.2). | T2.7 |
 | Claude mengerjakan permintaan dari pesan agen yang seluruhnya tempelan (§5.3). | T2.7 |
 | Tempelan maksimum (8192 + penanda) terkirim utuh. | T2.7 |
