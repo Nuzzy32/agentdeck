@@ -1,4 +1,5 @@
-// Static sample data for the T1.2 layout. Replaced by real panes from the Rust core in T1.3–T1.7.
+// App model: panes and workspaces (T1.5). Agent status and messages arrive with T1.7 and T2.7–T2.9.
+import type { Tree } from "./tree";
 
 export type PaneStatus = "starting" | "working" | "idle" | "needs_you" | "exited" | "unknown";
 export type NeedsKind = "permission" | "question" | "auth";
@@ -13,11 +14,20 @@ export type Pane = {
   exitCode?: number;
   parent?: string;
   pending: number;
-  /** Core pane id (T1.4); sample panes have none and show a placeholder body. */
-  ptyId?: number;
+  /** Core pane id from `pane_create_shell`. */
+  ptyId: number;
 };
 
-export type Workspace = { name: string; folder: string; panes: Pane[] };
+export type Workspace = {
+  id: number;
+  name: string;
+  /** Absolute path; panes start here. */
+  folder: string;
+  tree: Tree;
+  focused: string;
+  /** Pane shown alone (⌘⇧Enter), or null. */
+  zoomed: string | null;
+};
 
 export type Message = {
   time: string;
@@ -36,45 +46,8 @@ export const AGENTS: AgentChoice[] = [
   { name: "Codex", installed: false },
 ];
 
-export const WORKSPACES: Workspace[] = [
-  {
-    name: "api",
-    folder: "~/dev/app",
-    panes: [
-      {
-        id: "p1",
-        agent: "Claude Code",
-        title: "feat: auth",
-        folder: "~/dev/projects/client/app",
-        status: "working",
-        pending: 0,
-      },
-      {
-        id: "p2",
-        agent: "Codex",
-        title: "review: auth",
-        folder: "~/dev/projects/client/app",
-        status: "needs_you",
-        kind: "permission",
-        parent: "p1",
-        pending: 1,
-      },
-    ],
-  },
-  {
-    name: "web",
-    folder: "~/dev/web",
-    panes: [{ id: "p3", agent: "Shell", title: "zsh", folder: "~/dev/web", status: "needs_you", pending: 0 }],
-  },
-];
-
-export const MESSAGES: Message[] = [
-  { time: "14:02", from: "p1", to: "p2", status: "delivered", preview: "Review the diff on branch feat/auth for bugs." },
-  { time: "14:09", from: "p2", to: "p1", status: "queued", waited: "2 mnt", preview: "RESULT status=done 3 findings" },
-];
-
+/** Default loop guard limit (UI-UX §4.5); the real counter comes with T2.8. */
 export const LOOP_LIMIT = 12;
-export const LOOP_COUNT = 3;
 
 const NEEDS_LABEL: Record<NeedsKind, string> = {
   permission: "butuh izin",

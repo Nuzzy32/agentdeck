@@ -1,7 +1,7 @@
 import { TerminalPane } from "../pane/TerminalPane";
 import { IconButton } from "./Icon";
 import { splitMiddle } from "./logic";
-import { type Pane, statusLabel } from "./sample";
+import { type Pane, statusLabel } from "./model";
 
 /** Status dot; shape differs per status so it never relies on colour alone (UI-UX §1.3, §3). */
 export function StatusDot({ pane }: { pane: Pane }) {
@@ -12,14 +12,33 @@ export function StatusDot({ pane }: { pane: Pane }) {
   );
 }
 
-export function PaneView({ pane, focused, onFocus }: { pane: Pane; focused: boolean; onFocus: () => void }) {
+export type PaneActions = {
+  onFocus: () => void;
+  onSplit: (dir: "row" | "col") => void;
+  onZoom: () => void;
+  onClose: () => void;
+};
+
+export function PaneView({
+  pane,
+  focused,
+  zoomed,
+  fontSize,
+  actions,
+}: {
+  pane: Pane;
+  focused: boolean;
+  zoomed: boolean;
+  fontSize: number;
+  actions: PaneActions;
+}) {
   const label = statusLabel(pane);
   const { head, tail } = splitMiddle(pane.folder);
   return (
     <section
       className={`pane${focused ? " pane-focused" : ""}`}
       aria-label={`${pane.id} ${pane.agent}: ${pane.title}`}
-      onMouseDown={onFocus}
+      onMouseDown={actions.onFocus}
     >
       <header className="pane-header">
         <span className="pane-status" title={label}>
@@ -39,19 +58,18 @@ export function PaneView({ pane, focused, onFocus }: { pane: Pane; focused: bool
         {pane.parent ? <span className="badge pane-relation">anak {pane.parent}</span> : null}
         {pane.pending > 0 ? <span className="badge chip">{pane.pending} pesan</span> : null}
         <span className="pane-actions">
-          <IconButton icon="splitRight" label="Split kanan (⌘D)" />
-          <IconButton icon="splitDown" label="Split bawah (⌘⇧D)" />
-          <IconButton icon="maximize" label="Perbesar (⌘⇧Enter)" />
-          <IconButton icon="x" label="Tutup pane (⌘W)" />
+          <IconButton icon="splitRight" label="Split kanan (⌘D)" onClick={() => actions.onSplit("row")} />
+          <IconButton icon="splitDown" label="Split bawah (⌘⇧D)" onClick={() => actions.onSplit("col")} />
+          <IconButton
+            icon={zoomed ? "minimize" : "maximize"}
+            label={zoomed ? "Kembalikan (⌘⇧Enter)" : "Perbesar (⌘⇧Enter)"}
+            pressed={zoomed}
+            onClick={actions.onZoom}
+          />
+          <IconButton icon="x" label="Tutup pane (⌘W)" onClick={actions.onClose} />
         </span>
       </header>
-      {pane.ptyId !== undefined ? (
-        <TerminalPane id={pane.ptyId} focused={focused} />
-      ) : (
-        <div className="pane-body mono">
-          {pane.agent} di {pane.folder} (data contoh)
-        </div>
-      )}
+      <TerminalPane id={pane.ptyId} focused={focused} fontSize={fontSize} />
     </section>
   );
 }

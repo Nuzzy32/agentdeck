@@ -2,6 +2,9 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import "./styles/tokens.css";
 import App from "./App";
+import { installMenu } from "./menu";
+
+installMenu().catch((e: unknown) => console.error("menu", e));
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>

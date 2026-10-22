@@ -21,6 +21,7 @@ const PATHS = {
     </>
   ),
   maximize: <path d="M15 3h6v6m0-6l-7 7M3 21l7-7m-1 7H3v-6" />,
+  minimize: <path d="M14 10l7-7m-1 7h-6V4M3 21l7-7m-6 0h6v6" />,
   panelLeft: (
     <>
       <rect width="18" height="18" x="3" y="3" rx="2" />
