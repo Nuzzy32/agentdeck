@@ -8,7 +8,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use serde::{Deserialize, Serialize};
 use tauri::State;
@@ -164,10 +164,15 @@ pub struct MessageRow {
     pub state: &'static str,
     pub reason: Option<&'static str>,
     pub text: String,
+    /// Waiting (queued or paused) for [`delivery::HELD_AFTER`] or longer (MSG-07).
+    pub held: bool,
 }
 
 impl Record {
-    pub fn row(&self) -> MessageRow {
+    /// `now_ms`: ms since the epoch, the clock of `ts`.
+    pub fn row(&self, now_ms: u64) -> MessageRow {
+        let waiting = matches!(self.state, MsgState::Queued | MsgState::Paused);
+        let held_ms = u64::try_from(delivery::HELD_AFTER.as_millis()).unwrap_or(u64::MAX);
         MessageRow {
             id: self.id.clone(),
             ts: self.ts,
@@ -180,6 +185,7 @@ impl Record {
                 _ => None,
             },
             text: self.text.clone(),
+            held: waiting && now_ms.saturating_sub(self.ts) >= held_ms,
         }
     }
 }
@@ -443,11 +449,16 @@ impl Registry {
     }
 
     pub fn messages(&self, ws: u32) -> Vec<MessageRow> {
+        self.messages_at(ws, delivery::epoch_ms(SystemTime::now()))
+    }
+
+    /// [`Self::messages`] with the clock passed in (ms since the epoch).
+    pub fn messages_at(&self, ws: u32, now_ms: u64) -> Vec<MessageRow> {
         let ws = ws.to_string();
         self.messages
             .iter()
             .filter(|r| r.workspace == ws)
-            .map(Record::row)
+            .map(|r| r.row(now_ms))
             .collect()
     }
 
@@ -535,6 +546,9 @@ impl Registry {
             return self.dropped(gone);
         };
         let e = &self.panes[i];
+        if e.pty.is_none() && !e.exited {
+            return Step::Wait; // not running yet; also keeps a forced message from going nowhere
+        }
         let ws = e.workspace;
         let (input, last_output, bracketed_paste) = match &e.screen {
             Some(screen) => {
@@ -582,7 +596,7 @@ impl Registry {
                 }
                 Step::Deliver {
                     id,
-                    // `Busy` above when `pty` is None, so a delivery always has one.
+                    // Returned early above when `pty` is None and the pane did not exit; an exited pane never delivers.
                     pty: pty.unwrap_or_default(),
                     actions,
                     changed,
@@ -656,6 +670,24 @@ impl Registry {
             }
         }
         Some((self.guard_info(ws), changed))
+    }
+
+    /// "Kirim sekarang" in the Messages panel (MSG-07). Refused while the loop guard holds it ("Lanjutkan" first).
+    /// Returns the target and whether the caller starts its worker (none runs yet).
+    pub fn force(&mut self, id: &str) -> Result<(String, bool), String> {
+        let gone = || "Pesan ini sudah tidak menunggu.".to_owned();
+        let r = self
+            .messages
+            .iter()
+            .rev()
+            .find(|r| r.id == id)
+            .ok_or_else(gone)?;
+        if r.state == MsgState::Paused {
+            return Err("Antrean dijeda pengaman putaran. Pilih Lanjutkan dulu.".into());
+        }
+        let to = self.delivery.force(id).ok_or_else(gone)?;
+        let start_worker = self.workers.insert(to.clone());
+        Ok((to, start_worker))
     }
 
     /// "Buang" in the Messages panel. `None` when the message is no longer waiting.
@@ -1175,6 +1207,107 @@ mod tests {
         assert_eq!(r.guard(ws).unwrap().count, 0);
         assert_eq!(r.guard(99), None);
         assert_eq!(r.guard_stop(99), None);
+    }
+
+    #[test]
+    fn held_after_threshold_with_fake_clock() {
+        let (mut r, ws) = pair();
+        let t0 = 1_000_000;
+        let held_ms = delivery::HELD_AFTER.as_millis() as u64;
+        r.send("p1", "p2", "a", t0).unwrap();
+        r.send("p1", "p2", "b", t0).unwrap();
+        let held = |r: &Registry, now| -> Vec<bool> {
+            r.messages_at(ws, now).iter().map(|m| m.held).collect()
+        };
+        assert_eq!(held(&r, t0 + held_ms - 1), [false, false]);
+        assert_eq!(held(&r, t0 + held_ms), [true, true]);
+        assert_eq!(
+            held(&r, t0.saturating_sub(5)),
+            [false, false],
+            "clock went back"
+        );
+        // Delivered and dropped rows are never held; a paused one is.
+        assert!(matches!(
+            r.poll("p2", no_typing, Instant::now()),
+            Step::Deliver { .. }
+        ));
+        r.limits.set(Limit::LoopGuard, 2).unwrap();
+        r.send("p1", "p2", "c", t0).unwrap();
+        r.event("p2", 0, &idle());
+        assert!(matches!(
+            r.poll("p2", no_typing, Instant::now()),
+            Step::Deliver {
+                paused_now: true,
+                ..
+            }
+        ));
+        assert_eq!(states(&r, ws), ["delivered", "delivered", "paused"]);
+        assert_eq!(held(&r, t0 + held_ms), [false, false, true]);
+        r.discard("m3");
+        assert_eq!(held(&r, t0 + held_ms), [false, false, false]);
+    }
+
+    #[test]
+    fn force_refused_while_paused_or_gone_and_delivers_over_typing() {
+        let (mut r, ws) = pair();
+        for t in ["a", "b", "c"] {
+            r.send("p1", "p2", t, 1).unwrap();
+        }
+        // p2 has text in its input and the person typed just now.
+        let screen = r.screen("p2").unwrap();
+        screen.lock().unwrap().process(b"draft");
+        let now = Instant::now();
+        let typed = |_| Some(now);
+        assert!(matches!(r.poll("p2", typed, now), Step::Wait));
+        // A worker for p2 already runs (from `send`): the caller starts none.
+        assert_eq!(r.force("m3"), Ok(("p2".into(), false)));
+        let Step::Deliver {
+            id, pty, changed, ..
+        } = r.poll("p2", typed, now)
+        else {
+            panic!("forced message not delivered")
+        };
+        assert_eq!((id.as_str(), pty), ("m3", 7));
+        assert_eq!(changed[0].state, MsgState::Delivered);
+        assert_eq!(states(&r, ws), ["queued", "queued", "delivered"]);
+        assert!(r.force("m3").is_err(), "already delivered");
+        assert!(r.force("m9").is_err());
+        // Paused by the loop guard: refused until "Lanjutkan".
+        r.limits.set(Limit::LoopGuard, 2).unwrap();
+        r.event("p2", 0, &idle());
+        r.force("m1").unwrap();
+        assert!(matches!(
+            r.poll("p2", typed, now),
+            Step::Deliver {
+                paused_now: true,
+                ..
+            }
+        ));
+        assert_eq!(states(&r, ws), ["delivered", "paused", "delivered"]);
+        assert!(r.force("m2").unwrap_err().contains("Lanjutkan"));
+        r.guard_continue(ws);
+        r.limits.set(Limit::LoopGuard, 12).unwrap();
+        assert!(r.force("m2").is_ok());
+        assert!(matches!(r.poll("p2", typed, now), Step::Deliver { .. }));
+        assert!(r.worker_done("p2"));
+    }
+
+    #[test]
+    fn forced_message_waits_until_the_target_runs() {
+        let mut r = Registry::default();
+        let ws = r.create_workspace();
+        r.open(&spec(ws, Some("claude-code"))).unwrap();
+        r.open(&Spec {
+            parent: Some("p1".into()),
+            ..spec(ws, Some("codex"))
+        })
+        .unwrap();
+        r.send("p1", "p2", "a", 1).unwrap();
+        r.force("m1").unwrap();
+        assert!(matches!(
+            r.poll("p2", no_typing, Instant::now()),
+            Step::Wait
+        ));
     }
 
     #[test]

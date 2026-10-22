@@ -18,6 +18,8 @@ export type MessageRow = {
   state: MessageState;
   reason: string | null;
   text: string;
+  /** Queued or paused for 10 minutes or more (MSG-07). */
+  held: boolean;
 };
 
 export type LoopGuard = { count: number; limit: number; paused: boolean };
@@ -25,6 +27,8 @@ export type LoopGuard = { count: number; limit: number; paused: boolean };
 export type CollabClient = {
   messagesList(workspace: string): Promise<MessageRow[]>;
   messageDrop(id: string): Promise<void>;
+  /** "Kirim sekarang"; rejects while the loop guard holds the message. */
+  messageForce(id: string): Promise<void>;
   loopGuardGet(workspace: string): Promise<LoopGuard>;
   loopGuardContinue(workspace: string): Promise<void>;
   loopGuardStop(workspace: string): Promise<void>;
@@ -38,6 +42,7 @@ export type CollabClient = {
 export const tauriClient: CollabClient = {
   messagesList: (workspace) => invoke("messages_list", { workspace }),
   messageDrop: (id) => invoke("message_drop", { id }),
+  messageForce: (id) => invoke("message_force", { id }),
   loopGuardGet: (workspace) => invoke("loop_guard_get", { workspace }),
   loopGuardContinue: (workspace) => invoke("loop_guard_continue", { workspace }),
   loopGuardStop: (workspace) => invoke("loop_guard_stop", { workspace }),
@@ -66,6 +71,9 @@ export function pendingByPane(messages: MessageRow[]): Record<string, number> {
 }
 
 export type Collab = ReturnType<typeof createCollab>;
+
+/** `held` turns on with time alone, without a messages-changed event: workspaces with waiting messages reload this often. */
+export const HELD_REFRESH_MS = 30_000;
 
 /**
  * Per-workspace state for `useSyncExternalStore`: snapshots are replaced, never mutated. Reads that fail (command not
@@ -130,8 +138,12 @@ export function createCollab(client: CollabClient) {
         );
       keep(client.onMessagesChanged((ws) => void (state.has(ws) && loadMessages(ws))));
       keep(client.onLoopGuard(({ workspace, count, limit, paused }) => set(workspace, { guard: { count, limit, paused } })));
+      const timer = setInterval(() => {
+        for (const [ws, s] of state) if (s.messages.some(isWaiting)) void loadMessages(ws);
+      }, HELD_REFRESH_MS);
       return () => {
         stopped = true;
+        clearInterval(timer);
         for (const off of offs.splice(0)) off();
       };
     },
@@ -145,6 +157,11 @@ export function createCollab(client: CollabClient) {
     },
     async drop(ws: string, id: string) {
       await client.messageDrop(id);
+      await loadMessages(ws);
+    },
+    /** "Kirim sekarang" (the panel already asked the person). */
+    async force(ws: string, id: string) {
+      await client.messageForce(id);
       await loadMessages(ws);
     },
     /** Turning it on asks first (`confirm`); turning it off does not. */

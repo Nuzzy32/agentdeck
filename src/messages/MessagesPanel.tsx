@@ -1,5 +1,5 @@
-// Messages panel, UI-UX §4.4 (MSG-05). Driven by props: rows come from `messages_list` (src/core/messages.ts),
-// Copy and Discard go back to the caller.
+// Messages panel, UI-UX §4.4 (MSG-05, MSG-07). Driven by props: rows come from `messages_list`
+// (src/core/messages.ts); Copy, Discard and Send now go back to the caller.
 import { useEffect, useState } from "react";
 import { isWaiting, type MessageRow, type MessageState } from "../core/messages";
 import "./messages.css";
@@ -37,32 +37,77 @@ export function waited(ts: number, now: number): string {
 
 const firstLine = (text: string) => text.split("\n", 1)[0];
 
-/** Full text (selectable), the drop reason, Salin, and Buang for messages still waiting. */
+/**
+ * Full text (selectable), the drop reason, Salin, Buang for messages still waiting, and Kirim sekarang for queued ones
+ * (a paused one waits for Lanjutkan). Kirim sekarang asks first: the paste can take the person's typing with it.
+ */
 export function MessageDetail({
   id,
   m,
+  confirming,
   onCopy,
   onDiscard,
+  onAskForce,
+  onForce,
 }: {
   id: string;
   m: PanelMessage;
+  /** Kirim sekarang was pressed; the panel holds this so only one row asks at a time. */
+  confirming: boolean;
   onCopy: (text: string) => void;
   onDiscard: (id: string) => void;
+  /** Opens (`id`) or closes (`null`) the confirmation. */
+  onAskForce: (id: string | null) => void;
+  onForce: (id: string) => void;
 }) {
+  const canForce = m.state === "queued";
   return (
     <div id={id} className="msgs-detail">
       {m.state === "dropped" && m.reason ? <p className="msgs-reason danger">Alasan: {m.reason}</p> : null}
       <pre className="mono msgs-text">{m.text}</pre>
-      <div className="msgs-actions">
-        <button type="button" className="btn btn-small" onClick={() => onCopy(m.text)}>
-          Salin
-        </button>
-        {isWaiting(m) ? (
-          <button type="button" className="btn btn-small msgs-discard" onClick={() => onDiscard(m.id)}>
-            Buang
+      {confirming && canForce ? (
+        <div
+          className="msgs-confirm"
+          role="group"
+          aria-label="Kirim sekarang?"
+          onKeyDown={(e) => e.key === "Escape" && onAskForce(null)}
+        >
+          <p className="msgs-reason warn">
+            Ditempel ke {m.to} sekarang tanpa menunggu. Teks yang sedang diketik di sana bisa ikut terkirim.
+          </p>
+          <div className="msgs-actions">
+            <button type="button" className="btn btn-small" autoFocus onClick={() => onAskForce(null)}>
+              Batal
+            </button>
+            <button
+              type="button"
+              className="btn btn-small btn-primary"
+              onClick={() => {
+                onAskForce(null);
+                onForce(m.id);
+              }}
+            >
+              Kirim
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="msgs-actions">
+          <button type="button" className="btn btn-small" onClick={() => onCopy(m.text)}>
+            Salin
           </button>
-        ) : null}
-      </div>
+          {canForce ? (
+            <button type="button" className="btn btn-small" onClick={() => onAskForce(m.id)}>
+              Kirim sekarang
+            </button>
+          ) : null}
+          {isWaiting(m) ? (
+            <button type="button" className="btn btn-small msgs-discard" onClick={() => onDiscard(m.id)}>
+              Buang
+            </button>
+          ) : null}
+        </div>
+      )}
     </div>
   );
 }
@@ -74,6 +119,7 @@ export function MessagesPanel({
   now,
   onCopy,
   onDiscard,
+  onForce,
 }: {
   /** Workspace name. */
   title: string;
@@ -85,9 +131,11 @@ export function MessagesPanel({
   now?: number;
   onCopy: (text: string) => void;
   onDiscard: (id: string) => void;
+  onForce: (id: string) => void;
 }) {
   const [filter, setFilter] = useState<Filter>("all");
   const [open, setOpen] = useState<string | null>(null);
+  const [asking, setAsking] = useState<string | null>(null);
   const [tick, setTick] = useState(() => Date.now());
   const anyQueued = messages.some((m) => m.state === "queued");
   useEffect(() => {
@@ -145,7 +193,10 @@ export function MessagesPanel({
                   className="message"
                   aria-expanded={expanded}
                   aria-controls={expanded ? detail : undefined}
-                  onClick={() => setOpen(expanded ? null : m.id)}
+                  onClick={() => {
+                    setOpen(expanded ? null : m.id);
+                    setAsking(null);
+                  }}
                 >
                   <span className="message-line">
                     <span className="mono faint">{clock(m.ts)}</span>
@@ -164,9 +215,20 @@ export function MessagesPanel({
                       {m.state === "queued" ? ` ${waited(m.ts, clockNow)}` : ""}
                     </span>
                   </span>
+                  {m.held ? <span className="badge msgs-held">tertahan &gt; 10 menit</span> : null}
                   <span className="mono message-preview">{firstLine(m.text)}</span>
                 </button>
-                {expanded ? <MessageDetail id={detail} m={m} onCopy={onCopy} onDiscard={onDiscard} /> : null}
+                {expanded ? (
+                  <MessageDetail
+                    id={detail}
+                    m={m}
+                    confirming={asking === m.id}
+                    onCopy={onCopy}
+                    onDiscard={onDiscard}
+                    onAskForce={setAsking}
+                    onForce={onForce}
+                  />
+                ) : null}
               </li>
             );
           })}

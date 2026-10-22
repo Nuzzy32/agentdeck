@@ -29,6 +29,15 @@
   margin-left: auto;
   white-space: nowrap;
 }
+.msgs-held {
+  align-self: flex-start;
+  border-color: var(--warn);
+  color: var(--warn);
+  white-space: nowrap;
+}
+.msgs-confirm {
+  margin-top: 8px;
+}
 
 .msgs-detail {
   padding: 0 8px 8px;

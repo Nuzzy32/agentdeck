@@ -930,3 +930,101 @@ fn send_p2_to_p3(panes: &Panes, pm: &PaneManager, p1: u32, ws: u32) {
             .is_some_and(|m| m.text == "never delivered" && m.state == "queued")
     });
 }
+
+/// T4.6 (MSG-07) end to end: "Kirim sekarang" pastes a message that waits on the person's typing at once, through the
+/// worker and in the usual shape; the log records it like any delivery; a message held by the loop guard is refused
+/// until "Lanjutkan".
+#[test]
+fn force_sends_over_typing_and_waits_for_loop_guard() {
+    use agentdeck_lib::policy::Limit;
+    use agentdeck_lib::store::Store;
+
+    let panes = Panes::default();
+    let pm = PaneManager::default();
+    let data = std::env::temp_dir().join(format!("agentdeck-t46-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&data);
+    let engine = Engine::new(
+        panes.clone(),
+        pm.clone(),
+        Some(Store::new(&data)),
+        Arc::new(|_| {}),
+    );
+    let bin = fake_clis("t46");
+    let path = format!("{}:/usr/bin:/bin", bin.display());
+    let ws = panes::lock(&panes).create_workspace();
+    let start = |s: Spec| {
+        let env = launch::env(|k| std::env::var_os(k), &path);
+        let started = panes::start(&panes, &pm, None, env, &s, Box::new(|_| {})).unwrap();
+        wait_until(&format!("{} idle", started.pane), || {
+            status_of(&panes, &started.pane) == "idle"
+        });
+        started
+    };
+    let _p1 = start(spec(ws, "claude-code", None));
+    let p2 = start(Spec {
+        parent: Some("p1".into()),
+        ..spec(ws, "codex", None)
+    });
+
+    // The person keeps typing in p2: a normal delivery waits.
+    pm.write(p2.pty, b"draft", true).unwrap();
+    let (id, state) = engine.send("p1", "p2", "forced hello").unwrap();
+    assert_eq!(state, "queued");
+    thread::sleep(Duration::from_millis(500));
+    let screen = panes::lock(&panes).screen("p2").unwrap();
+    assert!(
+        !screen
+            .lock()
+            .unwrap()
+            .read(ROWS as usize)
+            .contains("forced hello")
+    );
+    pm.write(p2.pty, b"!", true).unwrap();
+    engine.force(&id).unwrap();
+    let marker = delivery::marker(&Sender {
+        pane: "p1",
+        agent: "claude-code",
+        title: Some("t: claude-code"),
+    });
+    wait_screen(&panes, "p2", "forced paste", |t| {
+        t.contains(&marker) && t.contains("forced hello")
+    });
+    wait_until("delivered", || {
+        states(&panes, ws) == [(id.clone(), "delivered")]
+    });
+    assert!(engine.force(&id).is_err(), "no longer waiting");
+
+    // Loop guard at 2: the next delivery pauses; a paused message cannot be forced until "Lanjutkan".
+    panes::lock(&panes).limits.set(Limit::LoopGuard, 2).unwrap();
+    wait_until("p2 idle", || status_of(&panes, "p2") == "idle");
+    engine.send("p1", "p2", "second").unwrap();
+    wait_until("paused", || panes::lock(&panes).guard(ws).unwrap().paused);
+    pm.write(p2.pty, b"more", true).unwrap();
+    let (held, state) = engine.send("p1", "p2", "third").unwrap();
+    assert_eq!(state, "paused");
+    assert!(engine.force(&held).unwrap_err().contains("Lanjutkan"));
+    engine.guard_continue(ws);
+    engine.force(&held).unwrap();
+    wait_screen(&panes, "p2", "third", |t| t.contains("third"));
+
+    // The log: forced messages read like any delivery (the line is written after the paste).
+    let of = |id: &str| -> Vec<String> {
+        let mut lines = Vec::new();
+        for f in std::fs::read_dir(data.join("logs")).unwrap() {
+            let text = std::fs::read_to_string(f.unwrap().path()).unwrap();
+            lines.extend(
+                text.lines()
+                    .map(|l| serde_json::from_str::<serde_json::Value>(l).unwrap())
+                    .filter(|l| l["message_id"] == id)
+                    .map(|l| l["state"].as_str().unwrap().to_owned()),
+            );
+        }
+        lines
+    };
+    wait_until("logged", || {
+        of(&id) == ["queued", "delivered"] && of(&held) == ["paused", "queued", "delivered"]
+    });
+    pm.close_all();
+    let _ = std::fs::remove_dir_all(&bin);
+    let _ = std::fs::remove_dir_all(&data);
+}
