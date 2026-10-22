@@ -5,7 +5,7 @@ atau PR). Kolom **Butuh** menyebut task yang harus selesai lebih dulu; task tanp
 dikerjakan paralel (ditandai ∥). Setiap task selesai bila kriteria **Selesai bila** terpenuhi dan workflow di
 `AGENTS.md` dijalankan.
 
-Status per 2026-10-22: Phase 0 selesai (S1–S8, T0.7); **Phase 1 selesai** (T1.1–T1.8); Phase 2: T2.1–T2.5, T2.7, T2.8, T2.9 selesai di core + UI (alur C lulus uji manual pemilik; alur D dan permintaan kerja Codex → Claude belum diuji, ARCHITECTURE §12); T2.6 tinggal ditinjau; Phase 4: T4.4 dan T4.5 selesai di core (`agents_info`, `agent_set_path`, D-023; UI di Settings); berikutnya uji manual alur C/D lalu Phase 3. Perbarui baris ini saat task selesai.
+Status per 2026-10-23: Phase 0–2 selesai (alur C lulus uji manual pemilik; alur D belum diuji). Phase 3: T3.1 (kartu persetujuan + notifikasi) dan T3.3 (Settings) selesai; berikutnya T3.2 `pane_spawn`, T3.4 audit, T3.5 alur B. Phase 4: T4.2 `pane_report` (core), T4.4/T4.5 (core: katalog pengguna, path manual, info login), T4.6 (pesan tertahan), T4.7 (tema/font terminal) selesai; sisa T4.1 worktree, T4.3 pulihkan tata letak, header laporan anak (UI T4.2). Perbarui baris ini saat task selesai.
 
 ## Phase 0 — Spike kelayakan
 Panduan lengkap: `docs/PHASE-0.md`. Tidak ada kode produk.
