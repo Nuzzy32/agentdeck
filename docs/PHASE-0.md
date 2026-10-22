@@ -63,21 +63,20 @@ terminal menjawab. `--osc7501` membuat probe menjawab query itu. `CLEAN` dari S1
 `msg` berisi base64; dekode untuk membaca alasannya.
 
 **Lulus:** `state=working`, `state=done`/`idle`, dan `state=blocked` saat prompt izin muncul. Hasil: lulus (D-016).
-**Bila gagal:** hook lewat `--settings` (`UserPromptSubmit`, `Stop`, `Notification` `permission_prompt`) sebagai cadangan,
-dan periksa bahwa hook pengguna tetap berjalan.
+Untuk uji ulang di versi Claude baru: bila OSC 7501 berhenti muncul, catat di DECISIONS dan tinjau desain status (hook
+`--settings` tidak dipakai, D-016).
 
 ## S5 — Status Codex
-Codex memancarkan OSC 7501 tanpa query (terlihat di S1). Yang belum terlihat: `blocked` saat meminta izin.
+Codex memancarkan OSC 7501 tanpa query (terlihat di S1). Perintah di bawah memastikan `blocked` saat meminta izin.
 
 ```bash
 # -s read-only -a on-request hanya untuk spike: memaksa permintaan izin. Izin tidak dijawab.
 "${CLEAN[@]}" python3 -I spikes/pty_probe.py --osc7501 --log spikes/out/s5-codex-perm.bin --paste-at 10 --duration 90 \
   --paste 'Create a file named spikes/out/s5.txt containing hi' -- codex -s read-only -a on-request
 ```
-**Lulus:** `state=blocked` (dengan `kind`) saat Codex meminta izin, dan `idle` saat turn selesai. Periksa layar akhir
-(renderer S7): bila tertulis "Selected model is at capacity", percobaan tidak sah, ulangi nanti.
-**Bila `blocked` tidak dipancarkan:** ulangi dengan `-c 'tui.notifications=["agent-turn-complete","approval-requested"]'
--c 'tui.notification_method="osc9"'` dan catat teks OSC 9 untuk permintaan izin.
+**Lulus:** `state=blocked` (tanpa `kind`/`msg`) saat Codex meminta izin, dan `idle` saat turn selesai. Hasil: lulus
+(D-017, dengan `-m gpt-6-luna`). Periksa layar akhir (renderer S7): bila tertulis "Selected model is at capacity",
+percobaan tidak sah; ulangi atau pilih model lain dengan `-m` (khusus spike).
 
 ## S7 — Layar headless dengan `vt100`
 **Pertanyaan:** apakah `vt100` membaca layar kedua TUI dengan benar?
@@ -140,8 +139,8 @@ diff spikes/out/s2-before.json spikes/out/s2-after.json && echo "MCP config unch
 ```
 `~/.claude.json` memang berubah di setiap sesi (statistik, riwayat proyek), jadi yang dibandingkan hanya bagian MCP.
 
-**Lulus:** `whoami` → `p1` tanpa prompt izin; `MCP config unchanged`. **Bila `${VAR}` tidak diekspansi:** ulangi dengan
-nilai literal di JSON dan catat (cadangan di ARCHITECTURE §4).
+**Lulus:** `whoami` → `p1` tanpa prompt izin; `MCP config unchanged`. Hasil: lulus, `${VAR}`
+diekspansi (D-017).
 
 ## S3 — Injeksi MCP ke Codex
 ```bash

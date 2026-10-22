@@ -17,6 +17,7 @@ Terakhir diperbarui: 2026-10-22. Baca ini dulu saat melanjutkan, lalu `docs/IMPL
 | D-015 | Prototipe Claude Design jadi acuan UI (sidebar, tanpa sorotan pesan di terminal) | — |
 | T1.1 | Kerangka Tauri 2 + React + TS, semua cek lulus, jendela terbuka | commit `db8e27d` |
 | S6 throughput | Lulus dengan flow control (jendela kredit 256 KB, ack kumulatif) | D-018, `spikes/s6-throughput/` |
+| T0.7 | Tinjauan docs (44 temuan) diterapkan; sisa yang belum terbukti di ARCHITECTURE §12 | D-019 |
 
 ## S6 throughput: selesai (D-018)
 Lulus dengan flow control: jendela kredit 256 KB di Rust + `pane_ack` kumulatif dari callback `term.write` (microtask),
@@ -24,8 +25,11 @@ perintah `async`. Sumber referensi: `spikes/s6-throughput/`. Branch `spike/s6` m
 tidak di-merge); boleh dihapus dengan `git branch -D spike/s6`.
 
 ## Berikutnya
-- T0.7: tinjau ulang ARCHITECTURE/MCP-TOOLS, pastikan tidak ada asumsi tanpa bukti.
 - T1.2: token desain (`src/styles/tokens.css`) + layout statis dari prototipe (D-015, UI-UX §2, §4.7, §6).
+
+## Keputusan tertunda (pemilik)
+- D-019: apakah kunci API (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`) boleh diteruskan ke agen lewat daftar izin.
+- Login Claude Code CLI pemilik kedaluwarsa per 2026-10-22: jalankan `claude`, lalu `/login` (dilakukan pemilik sendiri).
 
 ## Catatan kerja
 - Jalankan spike agen dengan env bersih (`CLEAN` di PHASE-0 S1); sesi Claude Code membocorkan `CLAUDE_CODE_*`.

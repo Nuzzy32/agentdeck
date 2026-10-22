@@ -23,9 +23,9 @@ ribuan baris per provider dan harus mengikuti perubahan SDK. Bukti dan analisis:
 Satu server di `127.0.0.1:<port acak>/mcp`. Pane diidentifikasi dari `Authorization: Bearer`, bukan `Mcp-Session-Id`,
 karena protokol MCP `2026-07-28` menghapus sesi (SEP-2567). `Host`/`Origin` asing ditolak.
 
-## D-005 — Injeksi per peluncuran, tidak menulis config global (2026-10-21, sementara sampai S2/S3)
-Claude Code: `--mcp-config <json>` tanpa `--strict-mcp-config` (agar MCP pengguna tetap termuat). Codex:
-`-c mcp_servers.agentdeck={...}`. Alasan: MXterm Pro menulis ke `~/.claude.json` dan `~/.codex/config.toml`; di luar
+## D-005 — Injeksi per peluncuran, tidak menulis config global (2026-10-21; terbukti di S2/S3, D-017)
+Claude Code: `--mcp-config <json>` tanpa `--strict-mcp-config` (agar MCP pengguna tetap termuat). Codex: kunci per
+baris `-c mcp_servers.agentdeck.url=…`, `.bearer_token_env_var=…`, `.default_tools_approval_mode="approve"` (D-017). Alasan: MXterm Pro menulis ke `~/.claude.json` dan `~/.codex/config.toml`; di luar
 MXterm, Claude Code memuat entri itu dengan variabel kosong dan melaporkan `INVALID_CONFIG` (terlihat 2026-10-21).
 
 ## D-006 — Kredensial dan ketentuan provider (2026-10-21)
@@ -47,8 +47,8 @@ menampilkan kuota yang diambil dari kredensial.
 
 ## D-007 — Status dari sinyal agen sendiri (2026-10-21; terbukti di S4/S5, D-016, D-017)
 Urutan: OSC 7501 dari agen (Claude setelah query dijawab, Codex tanpa query), lalu heuristik output. Hook Claude lewat
-`--settings` dan OSC 9 Codex hanya cadangan bila protokol berubah. Hook Codex tidak dipakai karena butuh kepercayaan lewat `/hooks` atau
-`--dangerously-bypass-hook-trust`. Membaca layar tidak dipakai untuk status karena rapuh terhadap perubahan TUI.
+`--settings` dan OSC 9 Codex tidak dipakai; ditinjau ulang hanya bila OSC 7501 berubah. Hook Codex juga butuh kepercayaan
+lewat `/hooks` atau `--dangerously-bypass-hook-trust`. Membaca layar tidak dipakai untuk status karena rapuh terhadap perubahan TUI.
 
 ## D-008 — Tool agentdeck tidak ditanyakan ulang oleh agen (2026-10-21)
 Claude: `--allowedTools mcp__agentdeck`. Codex: `default_tools_approval_mode="approve"` + anotasi tool. Alasan:
@@ -188,3 +188,25 @@ Dampak ke desain: ARCHITECTURE §3 (flow control), T1.3/T1.4. Jendela kredit dij
 (bukan pengaturan pengguna). Spike menjalankan jendela `always_on_top` hanya untuk pengukuran; produk tidak.
 Temuan sampingan: React StrictMode menjalankan `useEffect` dua kali di dev; pembuatan PTY di `TerminalPane` harus
 idempoten (id pane dari core, bukan dari efek).
+
+## D-019 — T0.7: tinjauan docs setelah Phase 0 (2026-10-22)
+Tinjauan semua docs terhadap D-013–D-018 (44 temuan). Keputusan yang diambil:
+- **Peluncuran Claude memakai `--` sebelum tugas.** `--mcp-config <configs...>` dan `--allowedTools <tools...>` menerima
+  banyak nilai (`claude --help` 2.1.303), jadi tanpa `--` tugas terbaca sebagai nama tool. Diuji: dengan `--`, tugas yang
+  diawali `--` masuk utuh sebagai prompt. Codex juga memakai `--` agar tugas yang diawali `-` aman.
+- **Codex `tool_timeout_sec=330`** (bawaan 60 detik menurut config-reference) agar `pane_spawn` bisa menunggu kartu
+  persetujuan sampai 300 detik. Belum diuji (T3.2).
+- **Env dari nol** ditambah `TMPDIR` dan `SSH_AUTH_SOCK` dari environment launchd agentdeck. Kunci API
+  (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`) tidak diteruskan. **Tertunda (keputusan pemilik):** apakah kunci API boleh
+  diteruskan lewat daftar izin di Settings; sampai diputuskan, pengguna yang login lewat kunci API di env tidak didukung.
+- **`PATH`** diambil dengan `$SHELL -l -i -c` di antara dua penanda, karena zsh non-interaktif tidak membaca `~/.zshrc`.
+- **Ketikan orang** ditandai dari event keyboard/paste DOM; balasan otomatis xterm.js (`reply`) tidak dihitung.
+- **Syarat siap** ditambah: kotak input agen kosong.
+- **Pane tanpa WebView** dikonfirmasi oleh core ke buffer putar ulang, agar agen tidak tertahan.
+- **Pengaman putaran** diatur ulang oleh Enter dari orang (bukan sembarang ketikan), sesuai ARCHITECTURE §5.5.
+- **Asal permintaan:** `Origin` apa pun → 403, `Host` selain loopback → 403.
+- **Satuan pesan:** 8 KB = 8192 byte isi + penanda ≤ 256 byte.
+- Galat tambahan `UNKNOWN_PANE` dan `BAD_ARGS` untuk `pane_send`/`pane_read`; batas `pane_report` 6 per menit.
+- OSC 7501 `blocked:kind=auth` dari Claude ("Login expired · Please run /login", terlihat saat uji di atas karena login
+  CLI pemilik kedaluwarsa) ditampilkan sebagai "perlu login".
+Sisa klaim yang belum terbukti beserta task pengujinya: ARCHITECTURE §12.

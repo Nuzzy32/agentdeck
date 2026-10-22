@@ -10,10 +10,12 @@ semua agen.
 | Nama | `agentdeck` (di Claude Code tool menjadi `mcp__agentdeck__<tool>`) |
 | Transport | Streamable HTTP, `POST http://127.0.0.1:<port>/mcp` |
 | Auth | `Authorization: Bearer <token pane>`; tanpa token yang valid → HTTP 401 |
+| Asal | `Origin` apa pun → HTTP 403; `Host` selain loopback → HTTP 403 |
+| Protokol | `2026-07-28` (tanpa sesi, Claude Code) dan `2025-06-18` (dengan `Mcp-Session-Id`, Codex 0.163.0) (D-017) |
 | Identitas | Pane pemanggil ditentukan dari token. Tidak ada argumen yang memilih pengirim. |
 
 ### Instructions (dikirim di `initialize`)
-Draf, disempurnakan setelah Phase 0:
+Terbukti dibaca kedua agen (S8). Teks disempurnakan di T2.2 dan T3.5:
 
 ```
 You are running inside an agentdeck pane. Other coding agents may run in panes beside you.
@@ -89,12 +91,12 @@ berjalan, bukan setelah anak selesai. Hasil anak datang lewat `pane_send` ke `"p
 |---|---|---|
 | `SPAWN_OFF` | Sakelar "Agen boleh membuka pane" mati. | Kerjakan sendiri; beri tahu orang bahwa sakelar ada di Settings. |
 | `DENIED` | Orang menolak kartu. | Kerjakan sendiri. Jangan minta lagi untuk spawn yang sama. |
-| `APPROVAL_TIMEOUT` | Tidak dijawab dalam 120 detik. | Tanyakan orang apakah mau dicoba lagi. |
+| `APPROVAL_TIMEOUT` | Tidak dijawab dalam batas waktu kartu (bawaan 120 detik). | Tanyakan orang apakah mau dicoba lagi. |
 | `NESTED` | Pemanggil sendiri dibuka oleh agen. | Kerjakan sendiri atau minta induk. |
 | `CAP_CHILDREN` | Sudah 3 anak hidup. | Tunggu anak selesai dan ditutup orang. |
 | `CAP_GLOBAL` | Sudah 8 pane agen dibuka agen. | Minta orang menutup pane yang tidak dipakai. |
 | `RATE` | 5 spawn per 10 menit terpakai. Pesan menyebut detik tunggu. | Tunggu, atau kerjakan sendiri. |
-| `UNKNOWN_AGENT` | id tidak ada di katalog. | Pakai id dari `pane_list` / dokumentasi. |
+| `UNKNOWN_AGENT` | id tidak ada di katalog. Teks galat menyebut id yang tersedia. | Pakai salah satu id dari teks galat. |
 | `AGENT_NOT_INSTALLED` | CLI tidak ditemukan di mesin. | Pilih agen lain atau beri tahu orang. |
 | `CWD_OUTSIDE` | `cwd` di luar folder kerja pemanggil. | Perbaiki path. |
 | `BAD_ARGS` | Argumen tidak valid (panjang, field asing). | Perbaiki argumen. |
@@ -108,7 +110,7 @@ Mengirim satu prompt ke pane lain. Teks ditempel ke terminal tujuan saat tujuan 
 | Nama | Tipe | Wajib | Aturan |
 |---|---|---|---|
 | `to` | string | ya | id pane (`"p2"`) atau `"parent"`. |
-| `text` | string | ya | 1 B – 8 KB setelah sanitasi. |
+| `text` | string | ya | 1 – 8192 byte UTF-8 setelah sanitasi. |
 
 **Hasil:** `{"message": "m7", "state": "queued" | "delivered" | "paused"}`. `paused` berarti pengaman putaran sedang
 menahan antrean; pesan tetap tersimpan sampai orang memutuskan.
@@ -116,6 +118,7 @@ menahan antrean; pesan tetap tersimpan sampai orang memutuskan.
 **Galat:**
 | Kode | Arti | Saran untuk agen |
 |---|---|---|
+| `UNKNOWN_PANE` | id pane tidak ada. | Periksa `pane_list`. |
 | `NOT_ALLOWED` | Relasi tidak mengizinkan (workspace lain, bukan induk/anak). | Periksa `pane_list`, kolom `can_send`. |
 | `PEER_SEND_OFF` | Tujuan peer, sakelar workspace mati. | Beri tahu orang; jangan cari jalan lain. |
 | `TARGET_SHELL` | Tujuan pane shell. | Tidak didukung. |
@@ -124,6 +127,7 @@ menahan antrean; pesan tetap tersimpan sampai orang memutuskan.
 | `SELF` | Mengirim ke diri sendiri. | Tidak perlu. |
 | `TOO_LARGE` | Lebih dari 8 KB. | Ringkas; tunjuk berkas atau commit, jangan tempel log panjang. |
 | `QUEUE_FULL` | Sudah 5 pesan tertahan untuk tujuan ini. | Tunggu tujuan memproses. |
+| `BAD_ARGS` | Argumen tidak valid (kosong, field asing). | Perbaiki argumen. |
 
 ---
 
@@ -134,11 +138,12 @@ Membaca teks layar pane lain (dari emulator headless, tanpa warna).
 | Nama | Tipe | Wajib | Aturan |
 |---|---|---|---|
 | `pane` | string | ya | id pane yang `can_read`. |
-| `lines` | integer | tidak | 1–400, bawaan 60. Diambil dari bawah layar + scrollback. |
+| `lines` | integer | tidak | 1–400, bawaan 60. Diambil dari bawah layar + scrollback. Saat alternate screen aktif (Claude Code, Codex) tidak ada scrollback, jadi paling banyak setinggi layar (ARCHITECTURE §12). |
 
 **Hasil:** `{"pane": "p2", "status": "idle", "text": "..."}`.
 
-**Galat:** `NOT_ALLOWED`, `READ_RATE` (lebih dari 30 panggilan per menit), `BAD_ARGS`.
+**Galat:** `UNKNOWN_PANE`, `NOT_ALLOWED` (termasuk pane shell dan peer saat sakelar "Agen boleh saling kirim" mati; teks
+galat menyebut alasannya), `READ_RATE` (lebih dari 30 panggilan per menit), `BAD_ARGS`.
 
 ---
 
@@ -163,3 +168,4 @@ salinannya untuk ditampilkan di header pane anak. Galat: `NO_PARENT`, `REPORT_RA
 | Pesan antar agen tanpa masukan orang (pengaman putaran) | 12 | 2–50 |
 | Pesan tertahan per tujuan | 5 | tetap |
 | `pane_read` per menit per pemanggil | 30 | tetap |
+| `pane_report` per menit per pemanggil (P1) | 6 | tetap |

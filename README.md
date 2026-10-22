@@ -21,5 +21,5 @@ adalah CLI resmi dengan login milikmu; agentdeck hanya menyediakan terminal dan 
 | [AGENTS.md](AGENTS.md) | Aturan untuk coding agent (dibaca Codex; `CLAUDE.md` mengimpornya) |
 
 ## Mulai
-Prasyarat dan langkah ada di [docs/SETUP.md](docs/SETUP.md). Urutan kerja: Phase 0 ([docs/PHASE-0.md](docs/PHASE-0.md)),
-lalu task di [docs/IMPLEMENTATION-PLAN.md](docs/IMPLEMENTATION-PLAN.md).
+Prasyarat dan langkah ada di [docs/SETUP.md](docs/SETUP.md). Phase 0 sudah selesai ([docs/PHASE-0.md](docs/PHASE-0.md));
+lanjutkan dari [docs/PROGRESS.md](docs/PROGRESS.md) dan task di [docs/IMPLEMENTATION-PLAN.md](docs/IMPLEMENTATION-PLAN.md).

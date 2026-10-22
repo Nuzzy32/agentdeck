@@ -48,7 +48,7 @@ Rust (`src-tauri/`):
 cd src-tauri
 cargo add portable-pty@0.9 vt100@0.18
 cargo add tokio --features full
-cargo add axum
+cargo add axum@0.8
 cargo add rmcp@3.6 --features server,macros,transport-streamable-http-server
 cargo add serde --features derive
 cargo add serde_json toml rand tracing tracing-subscriber
@@ -109,6 +109,6 @@ Di `src-tauri/tauri.conf.json`:
 | Gejala | Penyebab dan solusi |
 |---|---|
 | `cargo: command not found` setelah rustup | Terminal lama. Buka terminal baru atau `source "$HOME/.cargo/env"`. |
-| Aplikasi bilang `claude`/`codex` tidak terpasang padahal ada | Aplikasi GUI tidak mewarisi `PATH` dari shell. Core mengambil `PATH` dari `$SHELL -l` saat mulai (ARCHITECTURE §3); pastikan `PATH` diatur di `~/.zprofile`/`~/.zshrc`, bukan hanya di terminal tertentu. |
+| Aplikasi bilang `claude`/`codex` tidak terpasang padahal ada | Aplikasi GUI tidak mewarisi `PATH` dari shell. Core mengambil `PATH` dari `$SHELL -l -i -c` saat mulai (ARCHITECTURE §3), jadi `~/.zprofile` dan `~/.zshrc` terbaca; `PATH` yang hanya diatur di satu aplikasi terminal tidak terlihat. |
 | Agen tertahan di dialog "trust this folder" | Jalankan agen sekali secara manual di folder itu dan setujui. |
 | Build Rust lambat | Normal untuk build pertama; build berikutnya inkremental. |

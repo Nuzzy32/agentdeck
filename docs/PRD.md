@@ -71,7 +71,7 @@ Prioritas: **P0** wajib untuk MVP, **P1** setelah alur inti stabil, **P2** nanti
 | AGT-02 | P0 | Deteksi apakah CLI terpasang (`PATH` dari shell login). Bila tidak, tampilkan cara memasang; jangan memasang otomatis. |
 | AGT-03 | P0 | Meluncurkan agen di pane baru dengan folder kerja dan tugas awal opsional. |
 | AGT-04 | P0 | Header pane menampilkan agen, folder, dan status (`starting`, `working`, `idle`, `needs_you`, `exited`, `unknown`). |
-| AGT-05 | P1 | Tampilkan metode login agen bila CLI menyediakannya tanpa membaca kredensial (mis. `claude auth status`), dan peringatkan bila `ANTHROPIC_API_KEY` ada di environment (akan dipakai dan ditagih per token). |
+| AGT-05 | P1 | Tampilkan metode login agen bila CLI menyediakannya tanpa membaca kredensial (mis. `claude auth status`). Bila shell login pengguna berisi `ANTHROPIC_API_KEY`/`OPENAI_API_KEY`, beri tahu bahwa agentdeck tidak meneruskannya (D-014, D-019). Status `blocked:kind=auth` dari agen tampil sebagai "perlu login". |
 | AGT-06 | P1 | Agen tambahan lewat berkas katalog pengguna (gemini, opencode, dsb.). |
 | AGT-07 | P2 | Pemilihan model per peluncuran bila CLI mendukung flag model. |
 
@@ -84,16 +84,16 @@ Prioritas: **P0** wajib untuk MVP, **P1** setelah alur inti stabil, **P2** nanti
 | MCP-04 | P0 | Tool P0: `pane_list`, `pane_spawn`, `pane_send`, `pane_read` (kontrak di `docs/MCP-TOOLS.md`). |
 | MCP-05 | P0 | `instructions` server MCP menjelaskan cara memakai tool dan aturan kerja sama dengan teks kita sendiri. |
 | MCP-06 | P1 | `pane_report` (hasil terstruktur ke pane pembuka) dan opsi worktree pada `pane_spawn`. |
-| MCP-07 | P0 | Tolak permintaan dengan `Host`/`Origin` asing (perlindungan DNS rebinding). |
+| MCP-07 | P0 | Tolak permintaan yang membawa `Origin` apa pun atau `Host` selain loopback (perlindungan DNS rebinding). |
 
 ### 6.4 Pengiriman pesan (MSG)
 | ID | P | Persyaratan |
 |---|---|---|
-| MSG-01 | P0 | Pesan masuk antrean per pane tujuan dan ditempel saat tujuan siap: status `idle`, atau output sepi dan pengguna tidak sedang mengetik. |
+| MSG-01 | P0 | Pesan masuk antrean per pane tujuan dan ditempel saat tujuan siap (ARCHITECTURE §5.2): status `idle` (atau `unknown` dengan output sepi), pengguna tidak sedang mengetik, dan kotak input agen kosong. |
 | MSG-02 | P0 | Setiap pesan diawali baris penanda pengirim (pane, agen) dan dikirim sebagai satu tempelan lalu Enter. |
-| MSG-03 | P0 | Batas 8 KB per pesan; karakter kontrol dibuang kecuali baris baru. |
+| MSG-03 | P0 | Batas 8 KB (8192 byte) per pesan; karakter kontrol dibuang kecuali baris baru. |
 | MSG-04 | P0 | **Pengaman putaran:** setelah N pesan antar agen tanpa masukan orang di workspace (bawaan 12), antrean dijeda dan orang ditanya. |
-| MSG-05 | P0 | Panel log pesan per workspace: waktu, pengirim, tujuan, status (`queued`, `delivered`, `dropped`), isi. |
+| MSG-05 | P0 | Panel log pesan per workspace: waktu, pengirim, tujuan, status (`queued`, `delivered`, `paused`, `dropped`), isi. |
 | MSG-06 | P0 | Pengiriman antar pane yang bukan induk–anak hanya bila sakelar workspace "Agen boleh saling kirim" aktif (bawaan mati). |
 | MSG-07 | P1 | Pesan yang tertahan lebih dari 10 menit ditandai dan bisa dikirim paksa atau dibuang oleh orang. |
 
@@ -110,7 +110,7 @@ Prioritas: **P0** wajib untuk MVP, **P1** setelah alur inti stabil, **P2** nanti
 | ID | P | Persyaratan |
 |---|---|---|
 | SET-01 | P0 | Sakelar global "Agen boleh membuka pane" (bawaan mati) dan sakelar per workspace "Agen boleh saling kirim". |
-| SET-02 | P0 | Angka pengaman putaran (MSG-04) dan batas spawn bisa diatur dalam rentang aman. |
+| SET-02 | P0 | Angka pengaman putaran (MSG-04), batas spawn, dan batas waktu kartu persetujuan bisa diatur dalam rentang aman (MCP-TOOLS, Batas bawaan). |
 | SET-03 | P1 | Path CLI agen bisa ditimpa manual. |
 
 ## 7. Alur pengguna dan acceptance criteria
@@ -139,7 +139,7 @@ Prioritas: **P0** wajib untuk MVP, **P1** setelah alur inti stabil, **P2** nanti
 ### D. Pengaman putaran
 1. Dua agen saling membalas otomatis.
 2. Setelah 12 pesan tanpa masukan orang, antrean berhenti dan muncul kartu "Lanjutkan / Hentikan".
-- AC: mengetik di pane mana pun di workspace itu juga mengatur ulang hitungan.
+- AC: menekan Enter di pane mana pun di workspace itu juga mengatur ulang hitungan (ARCHITECTURE §5.5).
 
 ## 8. Kebutuhan non-fungsional
 - **Responsif:** ketikan tampil < 50 ms; 6 pane agen aktif bersamaan tanpa UI tersendat di MacBook Air M1 8 GB.
@@ -150,10 +150,10 @@ Prioritas: **P0** wajib untuk MVP, **P1** setelah alur inti stabil, **P2** nanti
 - **Aksesibilitas:** semua aksi bisa lewat keyboard; kartu persetujuan bisa dijawab dengan keyboard; kontras memadai.
 
 ## 9. Roadmap
-### Phase 0: Spike kelayakan (wajib sebelum Phase 2)
-Buktikan dengan CLI asli dan catat hasilnya di DECISIONS (lihat `docs/ARCHITECTURE.md` §10):
-tempel + Enter di Claude Code dan Codex; injeksi MCP per peluncuran di keduanya; hook status per sesi; throughput PTY
-lewat Tauri Channel; crate emulator headless untuk membaca layar.
+### Phase 0: Spike kelayakan (selesai 2026-10-22)
+Terbukti dengan CLI asli (D-013–D-018, ARCHITECTURE §10): tempel + Enter di kedua agen; injeksi MCP per peluncuran;
+status lewat OSC 7501; server MCP Rust dengan token per pane; throughput PTY lewat Tauri Channel dengan flow control;
+`vt100` untuk membaca layar. Sisa yang belum terbukti ada di ARCHITECTURE §12.
 
 ### Phase 1: Fondasi terminal
 Proyek Tauri, workspace dan split, pane shell, xterm.js, PTY, resize, penghentian proses (TERM-01..05), katalog dan peluncuran
@@ -164,7 +164,7 @@ Server MCP, token, injeksi, `pane_list`, `pane_read`, `pane_send`, antrean dan p
 (MCP-01..05, MCP-07, MSG-01..06).
 
 ### Phase 3: Agen membuka agen
-`pane_spawn`, kartu persetujuan, batas, status dari hook, pengaturan (SPN-01..04, SET-01..02). Alur B lulus ujung ke ujung.
+`pane_spawn`, kartu persetujuan, batas, pengaturan (SPN-01..04, SET-01..02). Alur B lulus ujung ke ujung.
 
 ### Phase 4: Kerja paralel
 Worktree, `pane_report`, pemulihan tata letak, katalog pengguna, info login (MCP-06, SPN-05, TERM-06..07, AGT-05..06, MSG-07).
@@ -175,7 +175,8 @@ Penandatanganan dan notarisasi, updater, ikon, halaman rilis.
 ## 10. Risiko dan mitigasi
 | Risiko | Mitigasi |
 |---|---|
-| Pembaruan CLI mengubah perilaku TUI sehingga tempel/Enter atau deteksi status rusak | Status utama dari hook resmi, bukan membaca layar; uji cepat dengan CLI asli di setiap rilis; katalog berupa data agar mudah diperbaiki. |
+| Pembaruan CLI mengubah perilaku TUI sehingga tempel/Enter atau deteksi status rusak | Status dari OSC 7501 yang dipancarkan agen sendiri, bukan membaca layar; uji cepat dengan CLI asli di setiap rilis (`spikes/pty_probe.py`); katalog berupa data agar mudah diperbaiki. |
+| OSC 7501 masih draf (rev 0.4, Oktober 2026) dan bisa berubah | Pemindai mengikuti aturan spesifikasi (kunci asing diabaikan); heuristik output sebagai cadangan; status `unknown` tidak pernah dianggap selesai. |
 | Prompt injection berantai: agen A menyuruh agen B melakukan hal berbahaya | Penanda pengirim di setiap pesan; anak tanpa flag bypass sehingga izin tetap ditanyakan ke orang; sakelar peer mati bawaan; `instructions` meminta agen memperlakukan pesan agen lain sebagai data. |
 | Dua agen saling membalas tanpa henti dan menghabiskan kuota | Pengaman putaran (MSG-04), batas spawn (SPN-02). |
 | Ketentuan provider berubah | Tidak menyentuh kredensial, binary tidak dimodifikasi; pantau halaman legal Claude Code dan Codex sebelum rilis publik. |

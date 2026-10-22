@@ -61,8 +61,11 @@ Titik status, id pane, dan nama agen tidak pernah dipotong.
 | `starting` | lingkaran kosong | memulai |
 | `working` | setengah terisi, berdenyut (dimatikan oleh reduced motion) | bekerja |
 | `idle` | penuh hijau | siap |
-| `needs_you` | penuh amber + ikon `!` | butuh kamu |
+| `needs_you` | penuh amber + ikon `!` | menurut `kind` OSC 7501: butuh izin / butuh jawaban / perlu login; tanpa `kind`: butuh kamu |
 | `exited` | abu-abu bergaris | selesai (kode N) |
+
+Bila agen melapor `error`, titik tetap `idle` dengan ikon galat kecil. `msg` dari agen (sudah didekode dan dibatasi)
+muncul sebagai tooltip pada label status. Codex tidak melapor galat (ARCHITECTURE §6), jadi ikon ini hanya untuk Claude.
 | `unknown` | abu-abu kosong | tidak diketahui |
 
 Pane terfokus: garis tepi 1 px warna aksen; header pane lain memakai teks `muted`.
@@ -111,7 +114,7 @@ Muncul di bagian atas pane peminta, menutupi baris teratas terminal, **tanpa men
 │                                    [Tolak]  [Izinkan ⌘↩]       │
 └────────────────────────────────────────────────────────────────┘
 ```
-- Hitung mundur 120 detik sebagai teks dan bar tipis; habis = ditolak, kartu berubah menjadi "Kedaluwarsa" 3 detik lalu hilang.
+- Hitung mundur sesuai batas waktu kartu di Settings (bawaan 120 detik) sebagai teks dan bar tipis; habis = ditolak, kartu berubah menjadi "Kedaluwarsa" 3 detik lalu hilang.
 - Keyboard: `⌘J` memindahkan fokus ke kartu tertunda tertua; di kartu, `⌘Enter` mengizinkan, `Esc` menolak, `Tab`
   berpindah tombol. Tanpa `⌘J`, ketikan tetap ke terminal.
 - Beberapa kartu bertumpuk, yang tertua di atas.
@@ -120,7 +123,7 @@ Muncul di bagian atas pane peminta, menutupi baris teratas terminal, **tanpa men
 
 ### 4.3 Pita pengaman putaran (MSG-04)
 Pita amber di atas workspace, di bawah title bar:
-"Agen sudah saling mengirim 12 pesan tanpa masukanmu. Antrean dijeda." · **Lanjutkan** · **Hentikan dan buang antrean** · **Lihat log**.
+"Agen sudah saling mengirim N pesan tanpa masukanmu. Antrean dijeda." (N dari Settings, bawaan 12) · **Lanjutkan** · **Hentikan dan buang antrean** · **Lihat log**.
 Tidak mengambil fokus; `⌘J` juga menjangkau pita ini.
 
 ### 4.4 Panel Pesan (MSG-05)
@@ -142,7 +145,7 @@ Daftar terbaru di bawah. Setiap baris:
 - `MCP aktif` (hijau) / `MCP mati` (merah, klik: alasan + **Coba lagi**). Port tidak ditampilkan.
 - `Agen membuka pane: aktif|mati`: klik membuka Settings › Kolaborasi.
 - `Saling kirim: aktif|mati`: klik langsung mengubah sakelar workspace (dengan konfirmasi saat menyalakan).
-- `Pesan antar agen n/12`: berubah amber di ≥ 75%.
+- `Pesan antar agen n/N` (N dari Settings, bawaan 12): berubah amber di ≥ 75%.
 
 ### 4.6 Settings (`⌘,`, modal 640 × 520 di dalam jendela utama)
 Navigasi kiri per bagian; `Esc` menutup; fokus kembali ke pane sebelumnya.
