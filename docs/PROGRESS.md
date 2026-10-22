@@ -1,6 +1,6 @@
 # Progres dan titik lanjut
 
-Terakhir diperbarui: 2026-10-22. Baca ini dulu saat melanjutkan, lalu `docs/IMPLEMENTATION-PLAN.md`.
+Terakhir diperbarui: 2026-10-22. **Phase 1 selesai.** Baca ini dulu saat melanjutkan, lalu `docs/IMPLEMENTATION-PLAN.md`.
 
 ## Sudah selesai (di `main`, sudah di-push)
 | Task | Hasil | Catatan |
@@ -30,7 +30,7 @@ Terakhir diperbarui: 2026-10-22. Baca ini dulu saat melanjutkan, lalu `docs/IMPL
 | T1.8 | `PaneManager::close_all` paralel (batas 5 s) di `RunEvent::Exit` (jendela terakhir, ⌘Q, `app.exit`); `terminate` memotret keturunan pane (`proc_listchildpids`) lalu `SIGHUP`+`SIGTERM`, `SIGKILL` setelah 3 s ke grup dan setiap keturunan | Tes: 3 pane × 7 keturunan (job abaikan HUP/TERM, `setsid`, foreground) habis dalam satu masa tenggang; crash (helper di-`SIGKILL`) membersihkan shell + job biasa. Batasan saat crash: ARCHITECTURE §12. Uji manual pemilik 2026-10-22 lulus: `sleep 601 &` + `claude` di shell, ⌘Q, tidak ada proses tersisa |
 | T2.5 | `tests/fake-agent` (std saja): mode claude/codex, bracketed paste, OSC 7501 sesuai Phase 0, `ASK` → blocked, `CALL` ke server MCP dengan token (dua versi protokol); `src-tauri/tests/fake_agent.rs` | 5 tes integrasi PTY memakai `status.rs` + `screen.rs` + `delivery.rs` + `mcp::server` |
 | T1.6 | `catalogue.rs` + `catalogue.toml`: katalog claude-code/codex, `PATH` dari `$SHELL -l -i -c` dengan penanda, deteksi + versi, penolakan flag bypass, argv dengan `--` | Terdeteksi di mesin pemilik: claude 2.1.306, codex 0.163.0 |
-| T1.7 | Peluncur (`src/launcher/`, ⌘T/⌘D/⌘⇧D/+, folder + 5 terakhir + dialog native D-021, tugas awal ⌘Enter), `launch.rs` (argv langsung, tugas setelah `--`, env dari nol), `pty.rs` menjawab `OSC 7501;?` dan mengirim event `status`/`exited` lewat `Channel` per pane, header status + tooltip `msg` + ikon galat, heuristik output, pita "selesai (kode N)" + Jalankan ulang / Buka shell di sini, "Gagal dijalankan" + Coba lagi, titik amber sidebar | Uji di `pnpm tauri dev` dengan harness sementara (salinan di catatan sesi `t1.7-e2e/`): alur A Claude (`memulai → siap`, dengan tugas `memulai → siap → bekerja → perlu login`), Codex (`memulai → siap`), CLI tidak terpasang (`SHELL=/bin/sh` → claude "Belum terpasang" + perintah pasang), config global tidak berubah. Belum diklik dengan mouse/keyboard fisik oleh pemilik |
+| T1.7 | Peluncur (`src/launcher/`, ⌘T/⌘D/⌘⇧D/+, folder + 5 terakhir + dialog native D-021, tugas awal ⌘Enter), `launch.rs` (argv langsung, tugas setelah `--`, env dari nol), `pty.rs` menjawab `OSC 7501;?` dan mengirim event `status`/`exited` lewat `Channel` per pane, header status + tooltip `msg` + ikon galat, heuristik output, pita "selesai (kode N)" + Jalankan ulang / Buka shell di sini, "Gagal dijalankan" + Coba lagi, titik amber sidebar | Uji di `pnpm tauri dev` dengan harness sementara (salinan di catatan sesi `t1.7-e2e/`): alur A Claude (`memulai → siap`, dengan tugas `memulai → siap → bekerja → perlu login`), Codex (`memulai → siap`), CLI tidak terpasang (`SHELL=/bin/sh` → claude "Belum terpasang" + perintah pasang), config global tidak berubah. Uji manual pemilik 2026-10-22 lulus (peluncur Claude/Codex, Esc, pita + Jalankan ulang / Buka shell di sini, tampilan) |
 
 ## S6 throughput: selesai (D-018)
 Lulus dengan flow control: jendela kredit di Rust (256 KB di D-018, diturunkan ke 128 KB di D-020) + `pane_ack` kumulatif dari callback `term.write` (microtask),
@@ -38,7 +38,6 @@ perintah `async`. Sumber referensi: `spikes/s6-throughput/`. Branch `spike/s6` m
 tidak di-merge); boleh dihapus dengan `git branch -D spike/s6`.
 
 ## Berikutnya
-- T1.7: uji manual pemilik (langkah di catatan kerja T1.7 di bawah).
 - T2.3: injeksi MCP saat peluncuran (`launch::agent` kini memanggil `build_args(None, …)`; tinggal isi URL + env token).
 - Phase 2 sisa: T2.3 (injeksi saat peluncuran), T2.4 tool `pane_list`/`pane_read`, T2.6, T2.7 penyambungan, T2.8, T2.9.
 
