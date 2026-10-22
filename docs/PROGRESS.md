@@ -23,6 +23,9 @@ Terakhir diperbarui: 2026-10-22. Baca ini dulu saat melanjutkan, lalu `docs/IMPL
 | T2.1 | `tokens.rs` (token CSPRNG, waktu-konstan, Debug disamarkan) + `policy.rs` (relasi §5.4, spawn, batas + rentang, rate limit, pengaman putaran) | Logika murni, belum disambungkan ke MCP (T2.2–T3.2) |
 | OSC 7501 | `status.rs`: pemindai streaming, jawaban query, pemetaan status + label `kind` | Logika murni, disambungkan ke thread baca di T1.7 |
 | T1.4 | `TerminalPane` (`src/pane/`): xterm.js + fit + webgl (cadangan DOM), tema dan font dari token, `pane_attach` lewat `Channel` + ack kumulatif via microtask, `onData` → `pane_write` dengan penanda `typed` (ketikan/tempelan DOM vs balasan xterm), resize, unmount = detach; operasi per pane diserialkan (StrictMode); pane `p1` di aplikasi = shell sungguhan di `~` | S6 diukur ulang: D-020 (ketikan p95 53–62 ms dengan jendela 256 KB saat banjir output berwarna, 19–24 ms dengan 128 KB; keputusan tertunda) |
+| T2.2 | Server MCP (`src-tauri/src/mcp/`): rmcp + axum di `127.0.0.1:0`, token lewat `tokens.rs`, `Origin` apa pun 403, `Host` asing 403, protokol 2026-07-28 dan 2025-06-18, `instructions`, tool sementara `whoami` | 4 tes integrasi HTTP; server dimulai di `setup`, galat start tidak mematikan aplikasi; `whoami` dihapus di T2.4 |
+| T2.4 (sebagian) | `screen.rs`: `vt100` per pane, `read(lines)` (alternate screen dibatasi tinggi layar), bracketed paste, `input_state` Empty/HasText/Unknown untuk Claude dan Codex | "HasText" hanya diuji dengan byte buatan (belum ada log nyata berisi ketikan); tool `pane_read` belum |
+| T2.7 (sebagian) | `delivery.rs`: sanitasi, batas 8192 byte, penanda ≤ 256 byte, urutan tempel + 150 ms + Enter, FIFO maks 5, syarat siap dengan jam palsu, dropped saat keluar | Logika murni; disambungkan ke PTY/MCP di T2.7 |
 | T1.6 | `catalogue.rs` + `catalogue.toml`: katalog claude-code/codex, `PATH` dari `$SHELL -l -i -c` dengan penanda, deteksi + versi, penolakan flag bypass, argv dengan `--` | Terdeteksi di mesin pemilik: claude 2.1.306, codex 0.163.0; belum disambungkan ke UI (T1.7) |
 
 ## S6 throughput: selesai (D-018)
@@ -34,6 +37,7 @@ tidak di-merge); boleh dihapus dengan `git branch -D spike/s6`.
 - T1.5: pohon split + workspace + pintasan (butuh T1.4).
 - T1.7: peluncur agen manual, menyambungkan `catalogue.rs` + `status.rs` ke thread baca `pty.rs` (butuh T1.5, T1.6).
 - T1.8: bersih-bersih saat aplikasi keluar.
+- Phase 2 sisa: T2.3 (injeksi saat peluncuran), T2.4 tool `pane_list`/`pane_read`, T2.5 fake-agent, T2.6, T2.7 penyambungan, T2.8, T2.9.
 
 
 ## Keputusan tertunda (pemilik)
@@ -47,6 +51,8 @@ tidak di-merge); boleh dihapus dengan `git branch -D spike/s6`.
 - T1.3: `pane_close` juga mengirim `SIGHUP`, bukan hanya `SIGTERM`: zsh interaktif mengabaikan `SIGTERM`, dan job
   latar belakangnya (grup proses sendiri) hanya ikut berhenti lewat `SIGHUP` dari shell. Tanpa ini tes job latar gagal.
   Thread baca tetap menguras PTY setelah tutup: di macOS proses yang keluar tertahan (`E`) sampai output-nya terbaca.
+- T1.4, T2.2, screen.rs, delivery.rs dikerjakan paralel di empat sesi worktree lalu digabung (2026-10-22). Saat
+  menggabung, git menaruh `vt100` di bagian `[dev-dependencies]`; diperbaiki manual. Periksa `Cargo.toml` setiap merge.
 - T1.2, T1.3, T2.1, OSC 7501, T1.6 dikerjakan paralel di lima sesi worktree lalu digabung (2026-10-22).
 - T1.4: harness ukur S6 untuk aplikasi nyata tidak di-commit; ARCHITECTURE §12 baris T1.4 belum diperbarui (lihat D-020).
   `htop` tidak terpasang di mesin pemilik; diuji dengan `top`. Tampilan visual (WebGL) belum dilihat mata: sesi agen tidak
