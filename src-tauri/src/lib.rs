@@ -133,6 +133,15 @@ async fn workspace_get_peer(
     Ok(panes::lock(&engine.panes).peer(workspace.id()?))
 }
 
+/// The last `pane_report` of a child pane, for its header; `null` before the first.
+#[tauri::command]
+async fn pane_report_last(
+    engine: tauri::State<'_, delivery::Engine>,
+    pane: String,
+) -> Result<Option<mcp::report::Report>, String> {
+    Ok(panes::lock(&engine.panes).report(&pane))
+}
+
 #[derive(Clone, serde::Serialize)]
 struct WorkspaceChanged {
     workspace: String,
@@ -176,16 +185,22 @@ pub fn run() -> tauri::Result<()> {
                 };
             });
             let engine = delivery::Engine::new(panes.clone(), pm.clone(), store, notify);
+            let handle = app.handle().clone();
+            let on_report: mcp::report::OnReport = std::sync::Arc::new(move |r| {
+                let _ = handle.emit("agentdeck://pane-report", r);
+            });
             // A failed start leaves the app usable (agents run without MCP); the status bar shows "MCP mati".
-            let status = match tauri::async_runtime::block_on(mcp::server::start(engine.clone())) {
-                Ok(port) => mcp::server::McpStatus::Running { port },
-                Err(e) => {
-                    eprintln!("agentdeck: MCP server not started: {e}");
-                    mcp::server::McpStatus::Off {
-                        reason: e.to_string(),
+            let status =
+                match tauri::async_runtime::block_on(mcp::server::serve(engine.clone(), on_report))
+                {
+                    Ok(port) => mcp::server::McpStatus::Running { port },
+                    Err(e) => {
+                        eprintln!("agentdeck: MCP server not started: {e}");
+                        mcp::server::McpStatus::Off {
+                            reason: e.to_string(),
+                        }
                     }
-                }
-            };
+                };
             app.manage(panes);
             app.manage(pm);
             app.manage(engine);
@@ -212,6 +227,7 @@ pub fn run() -> tauri::Result<()> {
             loop_guard_stop,
             workspace_set_peer,
             workspace_get_peer,
+            pane_report_last,
         ])
         .build(tauri::generate_context!())?
         .run(|app, event| {

@@ -302,7 +302,11 @@ async fn tools_listed_and_errors_are_tool_results() {
     .await;
     let tools = msg["result"]["tools"].as_array().unwrap();
     let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
-    assert_eq!(names, ["pane_list", "pane_read", "pane_send"], "{msg}");
+    assert_eq!(
+        names,
+        ["pane_list", "pane_read", "pane_send", "pane_report"],
+        "{msg}"
+    );
     assert_eq!(tools[1]["annotations"]["readOnlyHint"], true);
     assert_eq!(tools[2]["annotations"]["destructiveHint"], false);
 

@@ -1,4 +1,4 @@
-//! The agent-facing tools (MCP-TOOLS): `pane_list`, `pane_read`, `pane_send`. Arguments are parsed here, not by
+//! The agent-facing tools (MCP-TOOLS): `pane_list`, `pane_read`, `pane_send`, `pane_report`. Arguments are parsed here, not by
 //! rmcp, so a bad argument is a readable `BAD_ARGS` tool error rather than a JSON-RPC error. Every error is
 //! `CODE: explanation. what to do.` and becomes a tool result with `isError: true`.
 
@@ -10,6 +10,7 @@ use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 
+use super::report::Reports;
 use crate::delivery::Engine;
 use crate::panes;
 
@@ -44,6 +45,14 @@ fn schema(v: Value) -> Arc<JsonObject> {
 
 fn read_only() -> ToolAnnotations {
     ToolAnnotations::new().read_only(true)
+}
+
+fn sends() -> ToolAnnotations {
+    ToolAnnotations::new()
+        .read_only(false)
+        .destructive(false)
+        .idempotent(false)
+        .open_world(false)
 }
 
 pub fn list() -> Vec<Tool> {
@@ -86,13 +95,25 @@ pub fn list() -> Vec<Tool> {
                 "additionalProperties": false
             })),
         )
-        .with_annotations(
-            ToolAnnotations::new()
-                .read_only(false)
-                .destructive(false)
-                .idempotent(false)
-                .open_world(false),
-        ),
+        .with_annotations(sends()),
+        Tool::new(
+            "pane_report",
+            "Report your result to the agent that opened your pane (your parent), once, when the task is finished. \
+             It arrives there as a line `RESULT status=... files=... tests=...` followed by your summary. Only for \
+             panes opened by another agent. Limit: 6 calls per minute.",
+            schema(json!({
+                "type": "object",
+                "properties": {
+                    "status": {"type": "string", "enum": ["done", "failed", "blocked"]},
+                    "summary": {"type": "string", "description": "What you did and what is left, at most 2048 bytes."},
+                    "files": {"type": "array", "items": {"type": "string"}, "description": "Paths you changed."},
+                    "tests": {"type": "string", "enum": ["pass", "fail", "none"]}
+                },
+                "required": ["status", "summary"],
+                "additionalProperties": false
+            })),
+        )
+        .with_annotations(sends()),
     ]
 }
 
@@ -102,9 +123,10 @@ fn args<T: DeserializeOwned>(raw: Option<JsonObject>) -> Result<T, String> {
 }
 
 /// Runs tool `name` for pane `caller` (from its token). `Ok` and `Err` are both the text the agent reads.
-/// Blocking: `pane_send` may write a paste and wait the Enter delay.
+/// Blocking: `pane_send` and `pane_report` may write a paste and wait the Enter delay.
 pub fn call(
     engine: &Engine,
+    reports: &Reports,
     caller: &str,
     name: &str,
     raw: Option<JsonObject>,
@@ -139,8 +161,12 @@ pub fn call(
             let (id, state) = engine.send(caller, &a.to, &a.text)?;
             Ok(json!({"message": id, "state": state}).to_string())
         }
+        "pane_report" => {
+            let (id, state) = reports.send(engine, caller, args(raw)?)?;
+            Ok(json!({"message": id, "state": state}).to_string())
+        }
         _ => Err(format!(
-            "BAD_ARGS: no tool named {name:?}. Use pane_list, pane_read or pane_send."
+            "BAD_ARGS: no tool named {name:?}. Use pane_list, pane_read, pane_send or pane_report."
         )),
     }
 }
@@ -194,7 +220,8 @@ mod tests {
         let Value::Object(a) = args else {
             panic!("args")
         };
-        call(e, caller, name, Some(a)).map(|t| serde_json::from_str(&t).unwrap())
+        let r = Reports::new(Arc::new(|_| {}));
+        call(e, &r, caller, name, Some(a)).map(|t| serde_json::from_str(&t).unwrap())
     }
 
     fn code(r: Result<Value, String>) -> String {
@@ -212,20 +239,25 @@ mod tests {
     fn annotations_follow_mcp_tools() {
         let tools = list();
         let names: Vec<&str> = tools.iter().map(|t| t.name.as_ref()).collect();
-        assert_eq!(names, ["pane_list", "pane_read", "pane_send"]);
+        assert_eq!(
+            names,
+            ["pane_list", "pane_read", "pane_send", "pane_report"]
+        );
         for t in &tools[..2] {
             assert_eq!(t.annotations.as_ref().unwrap().read_only_hint, Some(true));
         }
-        let a = tools[2].annotations.as_ref().unwrap();
-        assert_eq!(
-            (
-                a.read_only_hint,
-                a.destructive_hint,
-                a.idempotent_hint,
-                a.open_world_hint
-            ),
-            (Some(false), Some(false), Some(false), Some(false))
-        );
+        for t in &tools[2..] {
+            let a = t.annotations.as_ref().unwrap();
+            assert_eq!(
+                (
+                    a.read_only_hint,
+                    a.destructive_hint,
+                    a.idempotent_hint,
+                    a.open_world_hint
+                ),
+                (Some(false), Some(false), Some(false), Some(false))
+            );
+        }
         for t in &tools {
             assert_eq!(t.input_schema["additionalProperties"], json!(false));
         }
@@ -245,13 +277,14 @@ mod tests {
         assert_eq!(ids, ["p1", "p2", "p3", "p4", "p6"]);
         assert_eq!(l["panes"][1]["relation"], "child");
         assert_eq!(l["peer_messaging"], false);
-        assert_eq!(call(&e, "p1", "pane_list", None).map(|_| ()), Ok(()));
+        let r = Reports::new(Arc::new(|_| {}));
+        assert_eq!(call(&e, &r, "p1", "pane_list", None).map(|_| ()), Ok(()));
         assert_eq!(
             code(call_json(&e, "p1", "pane_list", json!({"x": 1}))),
             "BAD_ARGS"
         );
         assert!(
-            call(&e, "p1", "whoami", None)
+            call(&e, &r, "p1", "whoami", None)
                 .unwrap_err()
                 .starts_with("BAD_ARGS: ")
         );
@@ -367,5 +400,72 @@ mod tests {
             "{err}"
         );
         assert!(call_json(&e, "p2", "pane_read", json!({"pane": "p1"})).is_ok());
+    }
+
+    #[test]
+    fn pane_report_goes_to_parent_and_every_error_code() {
+        use std::sync::Mutex;
+        let (e, ws) = engine();
+        let heard = Arc::new(Mutex::new(Vec::new()));
+        let sink = heard.clone();
+        let r = Reports::new(Arc::new(move |rep| sink.lock().unwrap().push(rep.clone())));
+        let report = |caller: &str, args: Value| -> Result<Value, String> {
+            let Value::Object(a) = args else {
+                panic!("args")
+            };
+            call(&e, &r, caller, "pane_report", Some(a)).map(|t| serde_json::from_str(&t).unwrap())
+        };
+        let ok = json!({"status": "done", "summary": "all good", "files": ["a.rs", "b.rs"], "tests": "pass"});
+        // Person-opened pane: NO_PARENT, and nothing stored or heard.
+        assert_eq!(code(report("p1", ok.clone())), "NO_PARENT");
+        assert_eq!(code(report("p1", json!({"status": "done"}))), "BAD_ARGS");
+        assert_eq!(
+            code(report(
+                "p2",
+                json!({"status": "done", "summary": "s", "to": "p3"})
+            )),
+            "BAD_ARGS"
+        );
+        assert_eq!(
+            code(report(
+                "p2",
+                json!({"status": "done", "summary": "a".repeat(2049)})
+            )),
+            "BAD_ARGS"
+        );
+        assert!(heard.lock().unwrap().is_empty());
+        assert_eq!(panes::lock(&e.panes).report("p2"), None);
+
+        let v = report("p2", ok.clone()).unwrap();
+        assert_eq!(
+            (v["message"].as_str(), v["state"].as_str()),
+            (Some("m1"), Some("queued"))
+        );
+        let rows = panes::lock(&e.panes).messages(ws);
+        assert_eq!((rows[0].from.as_str(), rows[0].to.as_str()), ("p2", "p1"));
+        assert_eq!(
+            rows[0].text,
+            "RESULT status=done files=a.rs,b.rs tests=pass\nall good"
+        );
+        let last = panes::lock(&e.panes).report("p2").unwrap();
+        assert_eq!(
+            (last.status, last.tests, last.files.len()),
+            ("done", "pass", 2)
+        );
+        assert_eq!(heard.lock().unwrap().as_slice(), [last]);
+
+        // p1's queue holds 5; a refused send (QUEUE_FULL) does not use a REPORT_RATE slot.
+        for _ in 0..4 {
+            report("p2", ok.clone()).unwrap();
+        }
+        assert_eq!(code(report("p2", ok.clone())), "QUEUE_FULL");
+        assert!(panes::lock(&e.panes).discard("m1").is_some());
+        report("p2", ok.clone()).unwrap();
+        let err = report("p2", ok.clone()).unwrap_err();
+        assert!(
+            err.starts_with("REPORT_RATE: ") && err.contains("Wait 6"),
+            "{err}"
+        );
+        assert_eq!(heard.lock().unwrap().len(), 6);
     }
 }

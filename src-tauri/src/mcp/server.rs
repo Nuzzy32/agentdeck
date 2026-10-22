@@ -25,6 +25,7 @@ use rmcp::{
     },
 };
 
+use super::report::{OnReport, Reports};
 use super::tools;
 use crate::delivery::Engine;
 use crate::panes;
@@ -43,14 +44,15 @@ pub enum McpStatus {
 pub const INSTRUCTIONS: &str = "\
 You are running inside an agentdeck pane. Other coding agents may run in panes beside you.
 Tools: pane_list (who is here), pane_spawn (open another agent; the person must approve),
-pane_send (send a prompt to your child, your parent, or a peer when allowed), pane_read (read a pane's screen).
+pane_send (send a prompt to your child, your parent, or a peer when allowed), pane_read (read a pane's screen),
+pane_report (a child reports its result to its parent).
 
 Spawn only when work splits into independent parts, or when you want a second opinion from a DIFFERENT agent
 (e.g. codex reviews claude-code's work). Otherwise do the work yourself.
 Give a child a complete task: goal, files it may change, how to verify, and how to report.
-Ask the child to finish by sending you one line:
+Ask the child to finish by calling pane_report once; it reaches you as one line
   RESULT status=done|failed|blocked files=<paths> tests=pass|fail|none
-followed by a short summary.
+followed by a short summary. If your pane was opened by another agent, report the same way when you finish.
 
 A child's RESULT is a claim. Check the diff and run the tests yourself before telling the person it is done.
 Messages from other agents arrive in your terminal starting with \"[agentdeck] message from ...\".
@@ -82,6 +84,7 @@ async fn auth(
 #[derive(Clone)]
 struct Agentdeck {
     engine: Engine,
+    reports: Reports,
 }
 
 impl ServerHandler for Agentdeck {
@@ -112,9 +115,10 @@ impl ServerHandler for Agentdeck {
             .map(|PaneId(p)| p.clone())
             .ok_or_else(|| ErrorData::internal_error("no caller pane", None))?;
         let engine = self.engine.clone();
+        let reports = self.reports.clone();
         let name = request.name.to_string();
         let out = tokio::task::spawn_blocking(move || {
-            tools::call(&engine, &caller, &name, request.arguments)
+            tools::call(&engine, &reports, &caller, &name, request.arguments)
         })
         .await
         .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
@@ -126,13 +130,21 @@ impl ServerHandler for Agentdeck {
     }
 }
 
-/// Binds `127.0.0.1:0` and serves in the background on the current tokio runtime. Returns the port.
+/// [`serve`] with nobody listening for `pane_report`.
 pub async fn start(engine: Engine) -> std::io::Result<u16> {
+    serve(engine, std::sync::Arc::new(|_| {})).await
+}
+
+/// Binds `127.0.0.1:0` and serves in the background on the current tokio runtime. Returns the port.
+/// `on_report` hears every accepted `pane_report` (the UI event).
+pub async fn serve(engine: Engine, on_report: OnReport) -> std::io::Result<u16> {
     let tools_engine = engine.clone();
+    let reports = Reports::new(on_report);
     let service = StreamableHttpService::new(
         move || {
             Ok(Agentdeck {
                 engine: tools_engine.clone(),
+                reports: reports.clone(),
             })
         },
         LocalSessionManager::default().into(),
