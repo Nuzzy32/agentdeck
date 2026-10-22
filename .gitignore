@@ -5,6 +5,7 @@ src-tauri/target/
 .DS_Store
 spikes/*/target/
 spikes/*/Cargo.lock
+tests/fake-agent/target/
 
 # Frontend (from create-tauri-app)
 dist-ssr

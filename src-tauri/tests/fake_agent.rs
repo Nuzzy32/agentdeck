@@ -1,0 +1,364 @@
+//! T2.5: `tests/fake-agent` in a real PTY, driven through `status.rs`, `screen.rs` and `delivery.rs` the way the pane
+//! reader will be, plus `CALL whoami` against `mcp::server::start` under both protocol versions.
+
+use std::io::{Read, Write};
+use std::path::PathBuf;
+use std::process::Command;
+use std::sync::OnceLock;
+use std::sync::mpsc::{self, Receiver};
+use std::thread;
+use std::time::{Duration, Instant};
+
+use agentdeck_lib::delivery::{self, Action, Delivery, PaneStatus, Poll, Sender, Target};
+use agentdeck_lib::mcp::server::{self, Tokens};
+use agentdeck_lib::policy::LoopGuard;
+use agentdeck_lib::screen::{self, Screen};
+use agentdeck_lib::status::{AgentStatus, Event, Kind, QUERY_REPLY, Scanner, State, Tracker};
+use portable_pty::{Child, CommandBuilder, PtySize, native_pty_system};
+
+const ROWS: u16 = 30;
+const COLS: u16 = 200;
+const WAIT: Duration = Duration::from_secs(10);
+
+/// Builds the fake agent once per test binary.
+fn binary() -> &'static PathBuf {
+    static BIN: OnceLock<PathBuf> = OnceLock::new();
+    BIN.get_or_init(|| {
+        let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../tests/fake-agent");
+        let target = dir.join("target");
+        let status = Command::new(env!("CARGO"))
+            .args(["build", "--quiet", "--manifest-path"])
+            .arg(dir.join("Cargo.toml"))
+            .arg("--target-dir")
+            .arg(&target)
+            .status()
+            .expect("run cargo build for fake-agent");
+        assert!(status.success(), "fake-agent build failed");
+        target.join("debug/fake-agent")
+    })
+}
+
+/// One pane: PTY + the per-pane state the core keeps (screen, OSC scanner, status tracker).
+struct Agent {
+    agent_id: &'static str,
+    writer: Box<dyn Write + Send>,
+    rx: Receiver<Vec<u8>>,
+    child: Box<dyn Child + Send + Sync>,
+    screen: Screen,
+    scanner: Scanner,
+    tracker: Tracker,
+    /// Answer `OSC 7501;?` like agentdeck does.
+    answer: bool,
+    queries: usize,
+    states: Vec<State>,
+    raw: Vec<u8>,
+}
+
+impl Agent {
+    fn spawn(mode: &str, env: &[(&str, &str)], task: Option<&str>, answer: bool) -> Self {
+        let pair = native_pty_system()
+            .openpty(PtySize {
+                rows: ROWS,
+                cols: COLS,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .unwrap();
+        let mut cmd = CommandBuilder::new(binary());
+        cmd.args(["--mode", mode]);
+        if let Some(t) = task {
+            cmd.args(["--", t]);
+        }
+        cmd.env("TERM", "xterm-256color");
+        for (k, v) in env {
+            cmd.env(k, v);
+        }
+        let child = pair.slave.spawn_command(cmd).unwrap();
+        drop(pair.slave);
+        let mut reader = pair.master.try_clone_reader().unwrap();
+        let writer = pair.master.take_writer().unwrap();
+        let (tx, rx) = mpsc::channel();
+        thread::spawn(move || {
+            let _master = pair.master; // keep the PTY open while reading
+            let mut buf = [0u8; 8192];
+            while let Ok(n @ 1..) = reader.read(&mut buf) {
+                if tx.send(buf[..n].to_vec()).is_err() {
+                    break;
+                }
+            }
+        });
+        Self {
+            agent_id: if mode == "claude" {
+                "claude-code"
+            } else {
+                "codex"
+            },
+            writer,
+            rx,
+            child,
+            screen: Screen::new(ROWS, COLS),
+            scanner: Scanner::default(),
+            tracker: Tracker::default(),
+            answer,
+            queries: 0,
+            states: Vec::new(),
+            raw: Vec::new(),
+        }
+    }
+
+    fn send(&mut self, bytes: &[u8]) {
+        self.writer.write_all(bytes).unwrap();
+        self.writer.flush().unwrap();
+    }
+
+    /// Reads output for up to `timeout`, feeding it where the pane reader will.
+    fn pump(&mut self, timeout: Duration) {
+        let Ok(chunk) = self.rx.recv_timeout(timeout) else {
+            return;
+        };
+        self.raw.extend_from_slice(&chunk);
+        self.screen.process(&chunk);
+        for event in self.scanner.feed(&chunk) {
+            match event {
+                Event::Query => {
+                    self.queries += 1;
+                    if self.answer {
+                        self.send(QUERY_REPLY);
+                    }
+                }
+                Event::Report(r) => {
+                    self.states.push(r.state);
+                    self.tracker.apply(r);
+                }
+            }
+        }
+    }
+
+    fn wait(&mut self, what: &str, mut done: impl FnMut(&mut Self) -> bool) {
+        let end = Instant::now() + WAIT;
+        while !done(self) {
+            assert!(
+                Instant::now() < end,
+                "timed out waiting for {what}; screen:\n{}",
+                self.screen.read(ROWS as usize)
+            );
+            self.pump(Duration::from_millis(50));
+        }
+    }
+
+    fn wait_text(&mut self, text: &str) {
+        self.wait(text, |a| a.screen.read(ROWS as usize).contains(text));
+    }
+
+    fn wait_state(&mut self, state: State) {
+        self.wait(&format!("{state:?}"), |a| {
+            a.tracker.current().map(|r| r.state) == Some(state)
+        });
+    }
+
+    /// Let output settle so the latest redraw is on the screen.
+    fn settle(&mut self) {
+        let end = Instant::now() + Duration::from_millis(300);
+        while Instant::now() < end {
+            self.pump(Duration::from_millis(20));
+        }
+    }
+
+    /// The snapshot T2.7 will hand to `Delivery::poll`.
+    fn target(&self) -> Target {
+        let status = match self.tracker.mapped().map(|m| m.status) {
+            Some(AgentStatus::Idle) => PaneStatus::Idle,
+            None => PaneStatus::Unknown,
+            Some(_) => PaneStatus::Busy,
+        };
+        Target {
+            alive: true,
+            status,
+            last_output: self.screen.last_output().unwrap_or_else(Instant::now),
+            last_typed: None,
+            input: match self.screen.input_state(self.agent_id) {
+                screen::InputState::Empty => delivery::InputState::Empty,
+                screen::InputState::HasText => delivery::InputState::HasText,
+                screen::InputState::Unknown => delivery::InputState::Unknown,
+            },
+            bracketed_paste: self.screen.bracketed_paste(),
+        }
+    }
+}
+
+impl Drop for Agent {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+    }
+}
+
+fn count(haystack: &str, needle: &str) -> usize {
+    haystack.matches(needle).count()
+}
+
+#[test]
+fn claude_reports_after_query_and_takes_delivered_paste_as_one_prompt() {
+    let mut a = Agent::spawn("claude", &[], None, true);
+    a.wait_state(State::Idle);
+    assert_eq!(a.queries, 1);
+    let r = a.tracker.current().unwrap();
+    assert_eq!(r.app.as_deref(), Some("claude-code"));
+    a.settle();
+    assert!(a.screen.bracketed_paste() && a.screen.alternate_screen());
+    assert_eq!(
+        a.screen.input_state("claude-code"),
+        screen::InputState::Empty
+    );
+
+    // Typed text shows in the input box, so delivery would wait.
+    a.send(b"draft");
+    a.wait("typed text", |a| {
+        a.screen.input_state("claude-code") == screen::InputState::HasText
+    });
+    a.send(b"\x7f\x7f\x7f\x7f\x7f");
+    a.wait("empty input", |a| {
+        a.screen.input_state("claude-code") == screen::InputState::Empty
+    });
+
+    let from = Sender {
+        pane: "p2",
+        agent: "codex",
+        title: Some("review: auth"),
+    };
+    let body = "line one\nline two\nCALL nothing-here\nlast line";
+    let mut d = Delivery::default();
+    let mut guard = LoopGuard::default();
+    d.enqueue(&from, "p1", body, &guard).unwrap();
+    let actions = match d.poll("p1", &a.target(), &mut guard, 12, Instant::now()) {
+        Poll::Deliver { actions, .. } => actions,
+        other => panic!("not delivered: {other:?}"),
+    };
+    a.states.clear();
+    for action in actions {
+        match action {
+            Action::Write(bytes) => a.send(&bytes),
+            Action::Sleep(t) => thread::sleep(t),
+        }
+    }
+    let marker = delivery::marker(&from);
+    let n = marker.len() + 1 + body.len();
+    a.wait_text(&format!("RECEIVED {n} bytes: {marker}"));
+    a.wait_state(State::Done);
+    assert_eq!(a.states, vec![State::Working, State::Done]);
+    a.settle();
+    assert_eq!(count(&a.screen.read(ROWS as usize), "RECEIVED"), 1);
+    assert_eq!(
+        a.screen.input_state("claude-code"),
+        screen::InputState::Empty
+    );
+
+    a.send(b"EXIT 3\r");
+    let end = Instant::now() + WAIT;
+    let status = loop {
+        if let Some(s) = a.child.try_wait().unwrap() {
+            break s;
+        }
+        assert!(Instant::now() < end, "fake-agent did not exit");
+        a.pump(Duration::from_millis(50));
+    };
+    assert_eq!(status.exit_code(), 3);
+}
+
+#[test]
+fn claude_stays_silent_without_query_reply() {
+    let mut a = Agent::spawn("claude", &[], None, false);
+    a.wait_text("no OSC 7501 reply; status reports off");
+    a.send(b"hello\r");
+    a.wait_text("RECEIVED 5 bytes: hello");
+    a.settle();
+    assert_eq!(a.queries, 1);
+    assert!(a.states.is_empty());
+    assert_eq!(a.tracker.mapped(), None);
+}
+
+#[test]
+fn codex_reports_without_query_and_prints_first_task() {
+    let mut a = Agent::spawn("codex", &[], Some("-first task"), true);
+    a.wait_text("RECEIVED 11 bytes: -first task");
+    a.wait_state(State::Idle);
+    a.settle();
+    assert_eq!(a.queries, 0);
+    assert_eq!(a.states, vec![State::Idle, State::Working, State::Idle]);
+    assert_eq!(a.tracker.current().unwrap().app.as_deref(), Some("codex"));
+    assert_eq!(a.screen.input_state("codex"), screen::InputState::Empty);
+    assert!(a.screen.bracketed_paste());
+}
+
+#[test]
+fn ask_blocks_until_y_in_both_modes() {
+    for (mode, kind, msg, label, finished) in [
+        (
+            "claude",
+            Some(Kind::Permission),
+            Some("approve Write: fake.txt"),
+            "butuh izin",
+            State::Done,
+        ),
+        ("codex", None, None, "butuh kamu", State::Idle),
+    ] {
+        let mut a = Agent::spawn(mode, &[], None, true);
+        a.wait_state(State::Idle);
+        a.send(b"ASK\r");
+        a.wait_state(State::Blocked);
+        let r = a.tracker.current().unwrap().clone();
+        assert_eq!((r.kind, r.msg.as_deref()), (kind, msg), "{mode}");
+        let m = r.mapped().unwrap();
+        assert_eq!((m.status, m.label), (AgentStatus::NeedsYou, Some(label)));
+        // Blocked: a new prompt is refused, only `y` answers.
+        a.send(b"more\r");
+        a.wait_text("BLOCKED: press y");
+        a.send(b"y");
+        a.wait_text("APPROVED");
+        a.wait_state(finished);
+    }
+}
+
+#[test]
+fn call_whoami_under_both_protocols() {
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let tokens = Tokens::default();
+    let (t1, t2) = {
+        let mut reg = tokens.write().unwrap();
+        (
+            reg.issue("p1").unwrap().expose().to_owned(),
+            reg.issue("p2").unwrap().expose().to_owned(),
+        )
+    };
+    let port = rt.block_on(server::start(tokens)).unwrap();
+    let url = format!("http://127.0.0.1:{port}/mcp");
+
+    for (mode, token, pane) in [("claude", &t1, "p1"), ("codex", &t2, "p2")] {
+        let env = [
+            ("AGENTDECK_MCP_URL", url.as_str()),
+            ("AGENTDECK_TOKEN", token.as_str()),
+        ];
+        let mut a = Agent::spawn(mode, &env, None, true);
+        a.wait_state(State::Idle);
+        a.send(b"CALL whoami {}\r");
+        // Each prompt ends in a redraw; wait on the text itself rather than catch one mid-redraw.
+        let want = format!(r#""text":"{pane}""#);
+        a.wait(&format!("{mode} whoami -> {pane}"), |a| {
+            let text = a.screen.read(ROWS as usize);
+            text.contains(&want) || text.contains("MCP ERROR")
+        });
+        let text = a.screen.read(ROWS as usize);
+        assert!(text.contains(&want), "{mode}:\n{text}");
+        assert!(!String::from_utf8_lossy(&a.raw).contains(token.as_str()));
+    }
+
+    // A wrong token is refused with 401 and the token is not echoed.
+    let env = [
+        ("AGENTDECK_MCP_URL", url.as_str()),
+        ("AGENTDECK_TOKEN", "not-a-token"),
+    ];
+    let mut a = Agent::spawn("codex", &env, None, true);
+    a.wait_state(State::Idle);
+    a.send(b"CALL whoami\r");
+    a.wait_text("MCP ERROR HTTP 401");
+    assert!(!a.screen.read(ROWS as usize).contains("not-a-token"));
+}
