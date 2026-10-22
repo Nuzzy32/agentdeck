@@ -62,15 +62,6 @@ export type Workspace = {
   zoomed: string | null;
 };
 
-export type Message = {
-  time: string;
-  from: string;
-  to: string;
-  status: "queued" | "delivered" | "paused" | "dropped";
-  waited?: string;
-  preview: string;
-};
-
 /** Default loop guard limit (UI-UX §4.5); the real counter comes with T2.8. */
 export const LOOP_LIMIT = 12;
 

@@ -2,7 +2,8 @@ import { useEffect, useRef } from "react";
 import { agentIcon, SHELL } from "../launcher/Launcher";
 import { Icon, IconButton } from "./Icon";
 import { nearLimit } from "./logic";
-import { type AgentInfo, LOOP_LIMIT, type Message, type Pane } from "./model";
+import { MessagesPanel as MessagesList, type PanelMessage } from "../messages/MessagesPanel";
+import { type AgentInfo, LOOP_LIMIT, type Pane } from "./model";
 import { StatusDot } from "./Pane";
 
 /** What the chrome shows of a workspace: its folder for display (`~/…`) and its panes in layout order. */
@@ -153,51 +154,16 @@ export function Sidebar({
   );
 }
 
-const MESSAGE_STATUS: Record<Message["status"], { text: string; tone: string }> = {
-  queued: { text: "menunggu", tone: "" },
-  delivered: { text: "terkirim", tone: "ok" },
-  paused: { text: "dijeda", tone: "warn" },
-  dropped: { text: "dibuang", tone: "danger" },
-};
-
-export function MessagesPanel({ workspace, messages }: { workspace: WorkspaceView; messages: Message[] }) {
+/** UI-UX §4.4. Copy goes to the clipboard; Discard needs the delivery queue and is wired in T2.7. */
+export function MessagesPanel({ workspace, messages }: { workspace: WorkspaceView; messages: PanelMessage[] }) {
   return (
-    <aside className="messages" aria-label="Panel Pesan">
-      <div className="section-head">
-        <span>Pesan · {workspace.name}</span>
-        <button type="button" className="text-btn" title="Filter pesan">
-          Semua ▾
-        </button>
-      </div>
-      {messages.length === 0 ? (
-        <p className="messages-empty">
-          Belum ada pesan antar agen di workspace ini. Pesan muncul saat agen memakai pane_send.
-        </p>
-      ) : (
-        <ul className="list messages-list">
-          {messages.map((m) => {
-            const s = MESSAGE_STATUS[m.status];
-            return (
-              <li key={`${m.time}-${m.from}`}>
-                <button type="button" className="message" title="Buka isi lengkap">
-                  <span className="message-line">
-                    <span className="mono faint">{m.time}</span>
-                    <span className="mono">
-                      {m.from} → {m.to}
-                    </span>
-                    <span className={s.tone}>
-                      {s.text}
-                      {m.waited ? ` ${m.waited}` : ""}
-                    </span>
-                  </span>
-                  <span className="mono message-preview">{m.preview}</span>
-                </button>
-              </li>
-            );
-          })}
-        </ul>
-      )}
-    </aside>
+    <MessagesList
+      title={workspace.name}
+      messages={messages}
+      panes={workspace.panes}
+      onCopy={(text) => void navigator.clipboard.writeText(text).catch(() => {})}
+      onDiscard={() => {}}
+    />
   );
 }
 

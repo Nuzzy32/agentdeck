@@ -7,6 +7,7 @@ pub mod policy;
 pub mod pty;
 pub mod screen;
 pub mod status;
+pub mod store;
 pub mod tokens;
 
 /// The launcher's agent list (T1.6): installed or not, version, install command. Off the async runtime, since
