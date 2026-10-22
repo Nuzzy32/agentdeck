@@ -1,4 +1,5 @@
 pub mod catalogue;
+pub mod delivery;
 pub mod policy;
 mod pty;
 pub mod status;
