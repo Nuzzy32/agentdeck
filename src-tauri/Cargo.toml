@@ -26,6 +26,8 @@ base64 = "0.22"
 # Katalog agen TOML (catalogue.rs). Keduanya sudah ada di pohon dependency Tauri; tidak menambah crate baru.
 serde = { version = "1", features = ["derive"] }
 toml = "1"
+# JSONL message and audit logs (store.rs). Already in the tree via tauri.
+serde_json = "1"
 # MCP server (mcp/, D-017). rmcp 3.6 + axum 0.8 as proven in spikes/s8-mcp; tokio is already in the tree via tauri.
 rmcp = { version = "3.6", features = ["server", "macros", "transport-streamable-http-server"] }
 axum = "0.8"
@@ -38,7 +40,6 @@ tauri-plugin-dialog = "2"
 [dev-dependencies]
 # HTTP client for the MCP integration test (tests/mcp_server.rs) only.
 reqwest = { version = "0.13", default-features = false, features = ["json"] }
-serde_json = "1"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration

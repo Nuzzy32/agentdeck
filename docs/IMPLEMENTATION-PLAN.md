@@ -5,7 +5,7 @@ atau PR). Kolom **Butuh** menyebut task yang harus selesai lebih dulu; task tanp
 dikerjakan paralel (ditandai ∥). Setiap task selesai bila kriteria **Selesai bila** terpenuhi dan workflow di
 `AGENTS.md` dijalankan.
 
-Status per 2026-10-22: Phase 0 selesai (S1–S8, T0.7); **Phase 1 selesai** (T1.1–T1.8, uji manual pemilik lulus); Phase 2: T2.1, T2.2, T2.5 selesai, logika murni `status.rs` (T2.6), `screen.rs` (T2.4), `delivery.rs` (T2.7) selesai; berikutnya T2.3. Perbarui baris ini saat task selesai.
+Status per 2026-10-22: Phase 0 selesai (S1–S8, T0.7); **Phase 1 selesai** (T1.1–T1.8, uji manual pemilik lulus); Phase 2: T2.1, T2.2, T2.5 selesai, logika murni `status.rs` (T2.6), `screen.rs` (T2.4), `delivery.rs` (T2.7), `store.rs` + panel Pesan (T2.9, belum disambungkan ke `pane_send`) selesai; berikutnya T2.3. Perbarui baris ini saat task selesai.
 
 ## Phase 0 — Spike kelayakan
 Panduan lengkap: `docs/PHASE-0.md`. Tidak ada kode produk.

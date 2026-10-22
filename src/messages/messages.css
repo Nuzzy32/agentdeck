@@ -1,0 +1,64 @@
+/* Messages panel details, docs/UI-UX.md §4.4. Base layout (.messages, .message, .message-line) is in layout.css. */
+
+.msgs-filter {
+  display: inline-flex;
+  gap: 2px;
+  text-transform: none;
+  letter-spacing: normal;
+  font-weight: normal;
+}
+
+.msgs-item + .msgs-item {
+  border-top: 1px solid var(--line);
+}
+.msgs-open {
+  background: var(--raised);
+  border-radius: var(--radius);
+}
+
+.msgs-route {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--faint);
+}
+.msgs-route .badge {
+  color: var(--fg);
+}
+.msgs-state {
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+.msgs-detail {
+  padding: 0 8px 8px;
+}
+.msgs-reason {
+  margin: 0 0 6px;
+  font-size: var(--text-label-lg);
+}
+.msgs-text {
+  max-height: 240px;
+  margin: 0;
+  padding: 8px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--fg);
+  font-size: var(--text-label-lg);
+  line-height: 1.4;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+.msgs-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 8px;
+}
+.msgs-discard {
+  border-color: var(--danger);
+  color: var(--danger);
+}
