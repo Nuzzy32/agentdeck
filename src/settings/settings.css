@@ -160,3 +160,12 @@
   gap: 8px;
   align-items: center;
 }
+/* The input takes the spare width; buttons keep their label on one line. */
+.settings-inline .input {
+  flex: 1;
+  min-width: 0;
+}
+.settings-inline .btn {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
