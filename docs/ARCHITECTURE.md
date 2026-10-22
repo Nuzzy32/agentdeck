@@ -317,7 +317,7 @@ dianggap selesai.
 | Pane di workspace tidak aktif, jendela tersembunyi, atau diminimalkan tetap mengalir dan statusnya tetap terbaca (D-018 hanya mengukur jendela terlihat). | T1.4 |
 | `pane_read` pada alternate screen: `vt100` tidak punya scrollback di sana; `lines` dibatasi tinggi layar bila alternate screen aktif. | T2.4 |
 | Saran samar Claude bisa dibedakan dari teks biasa lewat atribut `vt100`; bila tidak, dicatat sebagai batasan `pane_read`. | T2.4 |
-| `SIGTERM`/`SIGKILL` ke grup proses dan `SIGHUP` saat crash menghentikan anak agen (Bash tool, server MCP stdio) yang mungkin membuat sesi sendiri. | T1.3, T1.8 |
+| `SIGTERM`/`SIGKILL` ke grup proses dan `SIGHUP` saat crash menghentikan anak agen (Bash tool, server MCP stdio) yang mungkin membuat sesi sendiri. **T1.8, terbukti sebagian:** tutup pane/aplikasi menjangkau seluruh keturunan (grup lain, sesi sendiri, abaikan HUP/TERM) lewat potret pohon proses (tes `pty.rs`); proses yang sudah lepas ke launchd sebelum tutup (fork ganda) tidak terjangkau. Saat crash, shell dan job biasanya berhenti, tetapi proses di sesi sendiri (seperti Bash tool Claude Code) dan job yang mengabaikan `SIGHUP` **tetap hidup** kecuali agen induknya membersihkannya; tanpa daemon pengawas ini batasan. Perilaku agen asli saat crash belum diuji. | T1.3, T1.8 |
 | Env dari nol cukup untuk kerja nyata: `git push` lewat ssh, `npm install`, proxy/CA perusahaan, `LANG` saat dibuka dari Finder. | T1.7 |
 | `$SHELL -l -i -c` dengan penanda membaca `PATH` dengan benar (zsh, bash, fish) tanpa menggantung. | T1.6 |
 | 6 pane agen aktif di MacBook Air M1 8 GB tanpa UI tersendat (S6 hanya 2 pane, ±110 MB RSS). | T2.7 |

@@ -16,6 +16,8 @@ pub const WINDOW: u64 = 128 << 10;
 pub const REPLAY: usize = 1 << 20;
 /// Time between SIGTERM and SIGKILL on close.
 const KILL_GRACE: Duration = Duration::from_secs(3);
+/// Upper bound for `close_all`: KILL_GRACE, the 1 s wait after SIGKILL, and slack.
+const EXIT_LIMIT: Duration = Duration::from_secs(5);
 /// The only variables a pane inherits from agentdeck (D-014); TERM/COLORTERM are set explicitly.
 const PASS_ENV: [&str; 6] = ["HOME", "USER", "LOGNAME", "SHELL", "LANG", "PATH"];
 
@@ -129,9 +131,40 @@ fn signal_group(pgid: libc::pid_t, sig: libc::c_int) -> bool {
     unsafe { libc::killpg(pgid, sig) == 0 }
 }
 
-/// Waits until the group is gone or `deadline` passes.
-fn wait_group(pgid: libc::pid_t, deadline: Instant) -> bool {
-    while signal_group(pgid, 0) {
+fn signal_pid(pid: libc::pid_t, sig: libc::c_int) -> bool {
+    // SAFETY: kill takes plain integers and has no memory-safety preconditions.
+    unsafe { libc::kill(pid, sig) == 0 }
+}
+
+/// Every process below `pid` by parent link, whatever its group or session.
+#[cfg(target_os = "macos")]
+fn descendants(pid: libc::pid_t) -> Vec<libc::pid_t> {
+    let mut found = Vec::new();
+    let mut todo = vec![pid];
+    while let Some(p) = todo.pop() {
+        // ponytail: 1024 children per process; a parent with more loses the rest from the scan.
+        let mut buf = [0 as libc::pid_t; 1024];
+        let size = std::mem::size_of_val(&buf) as libc::c_int;
+        // SAFETY: `buf` is valid for `size` bytes. The call returns a count of pids, not bytes.
+        let n = unsafe { libc::proc_listchildpids(p, buf.as_mut_ptr().cast(), size) };
+        for &c in buf.iter().take(usize::try_from(n).unwrap_or(0)) {
+            if c > 1 && !found.contains(&c) {
+                found.push(c);
+                todo.push(c);
+            }
+        }
+    }
+    found
+}
+
+#[cfg(not(target_os = "macos"))]
+fn descendants(_pid: libc::pid_t) -> Vec<libc::pid_t> {
+    Vec::new()
+}
+
+/// Waits until `pred` holds or `deadline` passes.
+fn wait_until(deadline: Instant, pred: impl Fn() -> bool) -> bool {
+    while !pred() {
         if Instant::now() >= deadline {
             return false;
         }
@@ -272,19 +305,55 @@ impl PaneManager {
             .remove(&id)
             .ok_or_else(|| "no such pane".into())
     }
+
+    /// App exit (TERM-05): terminates every pane in parallel. Returns once all are gone, or at the latest after
+    /// EXIT_LIMIT, so quitting never hangs; whatever is left then still gets the kernel's SIGHUP as the masters close.
+    pub fn close_all(&self) {
+        let panes: Vec<_> = lock(&self.panes).drain().map(|(_, p)| p).collect();
+        let (tx, rx) = std::sync::mpsc::channel();
+        for pane in panes {
+            let tx = tx.clone();
+            // If the thread cannot start, its closure (and `tx`) is dropped and the pane is left to the SIGHUP.
+            let _ = std::thread::Builder::new()
+                .name("pane-close".into())
+                .spawn(move || {
+                    terminate(&pane);
+                    let _ = tx.send(());
+                });
+        }
+        drop(tx);
+        let deadline = Instant::now() + EXIT_LIMIT;
+        // Ends when every thread has reported and dropped its sender (Disconnected), or at the deadline.
+        while let Some(left) = deadline.checked_duration_since(Instant::now()) {
+            if rx.recv_timeout(left).is_err() {
+                break;
+            }
+        }
+    }
 }
 
-/// SIGHUP + SIGTERM to the process group, SIGKILL after KILL_GRACE. SIGHUP is what closing a terminal sends: an
-/// interactive shell ignores SIGTERM, but on SIGHUP it hangs up its background jobs, which live in their own groups.
+/// SIGHUP + SIGTERM to the process group and every descendant, SIGKILL after KILL_GRACE. SIGHUP is what closing a
+/// terminal sends: an interactive shell ignores SIGTERM, but on SIGHUP it hangs up its background jobs. The
+/// descendant scan reaches what killpg cannot: jobs in their own group and processes in a session of their own
+/// (Claude Code's Bash tool runs each command that way, `ps` shows it as `Ss`).
 fn terminate(pane: &Pane) {
     pane.out.close();
-    signal_group(pane.pgid, libc::SIGHUP);
-    signal_group(pane.pgid, libc::SIGTERM);
-    if !wait_group(pane.pgid, Instant::now() + KILL_GRACE) {
-        signal_group(pane.pgid, libc::SIGKILL);
-        // ponytail: a job that left the group and ignores SIGHUP (nohup ... &) survives and keeps the PTY open;
-        // killing the whole session needs a process scan (T1.8 if it shows up with real agents).
-        wait_group(pane.pgid, Instant::now() + Duration::from_secs(1));
+    // Snapshot before signalling: once a parent dies its children move to launchd and drop out of the tree.
+    // ponytail: a pid that exits during the grace and is reused within it would get the SIGKILL; check start
+    // times if that ever matters. Processes reparented to launchd before close (double fork) are not found.
+    let tree = descendants(pane.pgid);
+    let signal = |sig| {
+        signal_group(pane.pgid, sig);
+        for &p in &tree {
+            signal_pid(p, sig);
+        }
+    };
+    let gone = || !signal_group(pane.pgid, 0) && !tree.iter().any(|&p| signal_pid(p, 0));
+    signal(libc::SIGHUP);
+    signal(libc::SIGTERM);
+    if !wait_until(Instant::now() + KILL_GRACE, gone) {
+        signal(libc::SIGKILL);
+        wait_until(Instant::now() + Duration::from_secs(1), gone);
     }
 }
 
@@ -477,28 +546,8 @@ mod tests {
         false
     }
 
-    fn children(pid: u32) -> Vec<u32> {
-        let out = Command::new("pgrep")
-            .arg("-P")
-            .arg(pid.to_string())
-            .output();
-        let stdout = out.map(|o| o.stdout).unwrap_or_default();
-        String::from_utf8_lossy(&stdout)
-            .split_whitespace()
-            .filter_map(|s| s.parse().ok())
-            .collect()
-    }
-
-    fn descendants(pid: u32) -> Vec<u32> {
-        children(pid)
-            .into_iter()
-            .flat_map(|c| std::iter::once(c).chain(descendants(c)))
-            .collect()
-    }
-
-    fn alive(pid: u32) -> bool {
-        // SAFETY: kill with signal 0 only checks for existence.
-        unsafe { libc::kill(pid as libc::pid_t, 0) == 0 }
+    fn alive(pid: libc::pid_t) -> bool {
+        signal_pid(pid, 0)
     }
 
     /// Polls until `pred` holds, up to LONG.
@@ -541,37 +590,53 @@ mod tests {
         assert!(pm.write(id, b"x", true).is_err());
     }
 
-    fn assert_close_kills_tree(argv: &[String], setup: Option<&[u8]>, expect: usize) {
-        let pm = PaneManager::default();
-        let id = pm.spawn(argv, Path::new("/"), 24, 80).unwrap();
-        let leader = pm.get(id).unwrap().pgid as u32;
-        if let Some(input) = setup {
-            let (ch, rx) = sink();
-            pm.attach(id, ch).unwrap();
-            pm.write(id, input, false).unwrap();
-            // Wait until the shell has run the next command, i.e. it is done registering the background job.
-            pm.write(id, b"echo ready-$((1+1))\n", false).unwrap();
-            assert!(recv_until(&rx, "ready-2"));
-        }
+    /// Types `jobs` into an interactive shell and returns once the shell has registered them.
+    fn type_jobs(pm: &PaneManager, id: u32, jobs: &[u8]) {
+        let (ch, rx) = sink();
+        pm.attach(id, ch).unwrap();
+        pm.write(id, jobs, false).unwrap();
+        // Wait until the shell has run the next command, i.e. it is done registering the background jobs.
+        pm.write(id, b"echo ready-$((1+1))\n", false).unwrap();
+        assert!(recv_until(&rx, "ready-2"));
+        pm.detach(id).unwrap();
+    }
+
+    /// The pane's leader plus its descendants, once there are at least `expect` of them.
+    fn tree(pm: &PaneManager, id: u32, expect: usize) -> Vec<libc::pid_t> {
+        let leader = pm.get(id).unwrap().pgid;
         let mut tree = Vec::new();
         assert!(eventually(|| {
             tree = descendants(leader);
             tree.len() >= expect
         }));
         tree.push(leader);
-        terminate(&pm.remove(id).unwrap());
-        for pid in tree {
+        tree
+    }
+
+    fn assert_gone(tree: &[libc::pid_t]) {
+        for &pid in tree {
             if !eventually(|| !alive(pid)) {
                 let ps = Command::new("ps")
                     .args(["-o", "pid,ppid,pgid,stat,command", "-p", &pid.to_string()])
                     .output()
                     .unwrap();
                 panic!(
-                    "pid {pid} survived (leader {leader}): {}",
+                    "pid {pid} survived: {}",
                     String::from_utf8_lossy(&ps.stdout)
                 );
             }
         }
+    }
+
+    fn assert_close_kills_tree(argv: &[String], setup: Option<&[u8]>, expect: usize) {
+        let pm = PaneManager::default();
+        let id = pm.spawn(argv, Path::new("/"), 24, 80).unwrap();
+        if let Some(input) = setup {
+            type_jobs(&pm, id, input);
+        }
+        let tree = tree(&pm, id, expect);
+        terminate(&pm.remove(id).unwrap());
+        assert_gone(&tree);
     }
 
     #[test]
@@ -589,5 +654,87 @@ mod tests {
             Some(b"sh -c 'sleep 301; true' &\n"),
             2,
         );
+    }
+
+    /// Seven descendants: sh -> sleep; sh -> sleep that ignore SIGHUP and SIGTERM; perl -> sleep in a session of its
+    /// own (like Claude Code's Bash tool); and a foreground sleep.
+    const JOBS: &[u8] = b"sh -c 'sleep 305; true' &\n\
+        sh -c 'trap \"\" HUP TERM; sleep 306; true' &\n\
+        perl -MPOSIX -e 'if (my $p = fork) { waitpid $p, 0 } else { setsid; exec \"sleep\", 307 }' &\n";
+
+    #[test]
+    fn close_all_stops_every_pane_in_parallel() {
+        let pm = PaneManager::default();
+        let mut all = Vec::new();
+        for _ in 0..3 {
+            let id = pm
+                .spawn(&argv(&["/bin/zsh", "-f"]), Path::new("/"), 24, 80)
+                .unwrap();
+            type_jobs(&pm, id, JOBS);
+            pm.write(id, b"sleep 308\n", false).unwrap();
+            all.extend(tree(&pm, id, 7));
+        }
+        // SAFETY: getsid takes a plain integer.
+        let sessions = all.iter().filter(|&&p| unsafe { libc::getsid(p) } == p);
+        assert_eq!(sessions.count(), 6, "3 shells + 3 setsid'd sleeps");
+        let start = Instant::now();
+        pm.close_all();
+        let took = start.elapsed();
+        assert_gone(&all);
+        assert!(lock(&pm.panes).is_empty());
+        // Each pane needs the full grace (a job ignores SIGTERM); in parallel that is one grace, not three.
+        assert!(took < KILL_GRACE + Duration::from_secs(2), "{took:?}");
+    }
+
+    const CRASH_HELPER: &str = "AGENTDECK_CRASH_HELPER";
+
+    /// Holds two shell panes until `crash_leaves_no_process` SIGKILLs it.
+    #[test]
+    #[ignore = "child process of crash_leaves_no_process"]
+    fn crash_helper() {
+        if std::env::var_os(CRASH_HELPER).is_none() {
+            return;
+        }
+        let pm = PaneManager::default();
+        let mut all = Vec::new();
+        for _ in 0..2 {
+            let id = pm
+                .spawn(&argv(&["/bin/zsh", "-f"]), Path::new("/"), 24, 80)
+                .unwrap();
+            type_jobs(&pm, id, b"sh -c 'sleep 310; true' &\n");
+            pm.write(id, b"sleep 311\n", false).unwrap();
+            all.extend(tree(&pm, id, 3));
+        }
+        let pids: Vec<String> = all.iter().map(|p| p.to_string()).collect();
+        println!("pids {}", pids.join(" "));
+        loop {
+            std::thread::sleep(LONG);
+        }
+    }
+
+    #[test]
+    fn crash_leaves_no_process() {
+        use std::io::{BufRead, BufReader};
+        let mut helper = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "pty::tests::crash_helper",
+                "--ignored",
+                "--nocapture",
+            ])
+            .env(CRASH_HELPER, "1")
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        let line = BufReader::new(helper.stdout.take().unwrap())
+            .lines()
+            .map_while(Result::ok)
+            .find_map(|l| l.strip_prefix("pids ").map(str::to_owned))
+            .expect("helper printed no pids");
+        let tree: Vec<libc::pid_t> = line.split(' ').map(|p| p.parse().unwrap()).collect();
+        assert_eq!(tree.len(), 8);
+        helper.kill().unwrap(); // SIGKILL: no destructor, no close_all; only the kernel closes the masters.
+        helper.wait().unwrap();
+        assert_gone(&tree);
     }
 }

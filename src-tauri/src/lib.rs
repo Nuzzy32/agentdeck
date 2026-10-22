@@ -37,5 +37,13 @@ pub fn run() -> tauri::Result<()> {
             pty::pane_ack,
             pty::pane_close,
         ])
-        .run(tauri::generate_context!())
+        .build(tauri::generate_context!())?
+        .run(|app, event| {
+            // Exit fires once on every way out: last window closed, ⌘Q, app.exit (TERM-05).
+            if let tauri::RunEvent::Exit = event {
+                use tauri::Manager;
+                app.state::<pty::PaneManager>().close_all();
+            }
+        });
+    Ok(())
 }
