@@ -1,11 +1,13 @@
 //! Argv dan environment untuk satu pane (ARCHITECTURE §3–§4). Program dijalankan langsung tanpa shell (D-009) dengan
-//! environment yang disusun dari nol (D-014). Injeksi MCP menyusul di T2.3; di sini `mcp_url` selalu `None`.
+//! environment yang disusun dari nol (D-014), plus injeksi MCP per peluncuran untuk pane agen (D-005, T2.3).
 
 use std::ffi::OsString;
+use std::fmt;
 
 use serde::Serialize;
 
 use crate::catalogue::{self, Catalogue};
+use crate::tokens::Token;
 
 /// Satu-satunya variabel yang diambil dari environment agentdeck (D-014, D-019). `PATH` datang dari shell login.
 pub const INHERIT: [&str; 7] = [
@@ -22,12 +24,31 @@ pub const INHERIT: [&str; 7] = [
 const FALLBACK_LANG: &str = "en_US.UTF-8";
 
 /// Yang dijalankan di PTY: `argv[0]` jalur absolut, env lengkap (anak tidak mewarisi apa pun di luar ini).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct Launch {
     pub argv: Vec<String>,
     pub env: Vec<(String, OsString)>,
     /// Agen melapor status lewat OSC 7501 (semua agen bawaan); shell tidak dipindai.
     pub osc_status: bool,
+}
+
+/// Nilai env tidak dicetak: `AGENTDECK_TOKEN` ada di sana (AGENTS.md aturan 6).
+impl fmt::Debug for Launch {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Launch")
+            .field("argv", &self.argv)
+            .field("env", &self.env.iter().map(|(k, _)| k).collect::<Vec<_>>())
+            .field("osc_status", &self.osc_status)
+            .finish()
+    }
+}
+
+/// Injeksi MCP satu pane agen (ARCHITECTURE §4). Token hanya masuk env, tidak pernah argv.
+pub struct Mcp<'a> {
+    /// `http://127.0.0.1:<port>/mcp`
+    pub url: &'a str,
+    pub token: &'a Token,
+    pub pane: &'a str,
 }
 
 /// Galat untuk UI (UI-UX §5): `message` siap tampil, `install` perintah pasang yang bisa disalin.
@@ -78,12 +99,14 @@ pub fn shell(env: Vec<(String, OsString)>) -> Launch {
     }
 }
 
-/// Agen dari katalog: biner dicari di `PATH` env itu sendiri, tugas setelah `--` sebagai satu argumen.
+/// Agen dari katalog: biner dicari di `PATH` env itu sendiri, tugas setelah `--` sebagai satu argumen. Dengan `mcp`,
+/// argv templat katalog (`{mcp_url}`) dan env `AGENTDECK_*` ditambahkan; tanpa itu (server MCP mati) agen jalan polos.
 pub fn agent(
     cat: &Catalogue,
     id: &str,
     task: Option<&str>,
-    env: Vec<(String, OsString)>,
+    mut env: Vec<(String, OsString)>,
+    mcp: Option<Mcp>,
 ) -> Result<Launch, LaunchError> {
     let agent = cat
         .get(id)
@@ -102,7 +125,12 @@ pub fn agent(
         });
     };
     let mut argv = vec![program];
-    argv.extend(agent.build_args(None, task));
+    argv.extend(agent.build_args(mcp.as_ref().map(|m| m.url), task));
+    if let Some(m) = mcp {
+        env.push(("AGENTDECK_MCP_URL".into(), m.url.into()));
+        env.push(("AGENTDECK_TOKEN".into(), m.token.expose().into()));
+        env.push(("AGENTDECK_PANE_ID".into(), m.pane.into()));
+    }
     Ok(Launch {
         argv,
         env,
@@ -194,28 +222,85 @@ mod tests {
         let cat = Catalogue::builtin().unwrap();
         for (id, bin) in [("claude-code", "claude"), ("codex", "codex")] {
             let task = "--dangerously-skip-permissions; rm -rf ~ $(x)";
-            let l = agent(&cat, id, Some(task), env(polluted, &path)).unwrap();
-            // No shell, no MCP injection yet (T2.3), the task one untouched element after `--`.
+            let l = agent(&cat, id, Some(task), env(polluted, &path), None).unwrap();
+            // No shell, no MCP without a server, the task one untouched element after `--`.
             assert_eq!(
                 l.argv,
                 [dir.join(bin).to_str().unwrap(), "--", task],
                 "{id}"
             );
             assert!(l.osc_status);
-            let bare = agent(&cat, id, None, env(polluted, &path)).unwrap();
+            let bare = agent(&cat, id, None, env(polluted, &path), None).unwrap();
             assert_eq!(bare.argv.len(), 1);
-            let empty = agent(&cat, id, Some(""), env(polluted, &path)).unwrap();
+            let empty = agent(&cat, id, Some(""), env(polluted, &path), None).unwrap();
             assert_eq!(empty.argv, bare.argv);
+        }
+    }
+
+    /// ARCHITECTURE §4 exactly: Claude `--mcp-config` with `${VAR}` and `--allowedTools`, Codex four `-c` keys
+    /// including `tool_timeout_sec=330`, then `--` and the task. The token is in env only.
+    #[test]
+    fn mcp_injection_puts_token_in_env_only() {
+        let dir = bin_dir(&["claude", "codex"]);
+        let path = dir.display().to_string();
+        let cat = Catalogue::builtin().unwrap();
+        let token = Token::generate().unwrap();
+        let url = "http://127.0.0.1:4321/mcp";
+        let mcp = || {
+            Some(Mcp {
+                url,
+                token: &token,
+                pane: "p7",
+            })
+        };
+        let big = format!("-{}", "x".repeat(16 * 1024 - 1));
+        let claude = agent(&cat, "claude-code", Some(&big), env(polluted, &path), mcp()).unwrap();
+        assert_eq!(
+            claude.argv[1..],
+            [
+                "--mcp-config",
+                r#"{"mcpServers":{"agentdeck":{"type":"http","url":"${AGENTDECK_MCP_URL}","headers":{"Authorization":"Bearer ${AGENTDECK_TOKEN}"}}}}"#,
+                "--allowedTools",
+                "mcp__agentdeck",
+                "--",
+                big.as_str(),
+            ]
+        );
+        let codex = agent(&cat, "codex", Some("-a never"), env(polluted, &path), mcp()).unwrap();
+        assert_eq!(
+            codex.argv[1..],
+            [
+                "-c",
+                r#"mcp_servers.agentdeck.url="http://127.0.0.1:4321/mcp""#,
+                "-c",
+                r#"mcp_servers.agentdeck.bearer_token_env_var="AGENTDECK_TOKEN""#,
+                "-c",
+                r#"mcp_servers.agentdeck.default_tools_approval_mode="approve""#,
+                "-c",
+                "mcp_servers.agentdeck.tool_timeout_sec=330",
+                "--",
+                "-a never",
+            ]
+        );
+        for l in [&claude, &codex] {
+            assert_eq!(value(&l.env, "AGENTDECK_MCP_URL"), Some(url));
+            assert_eq!(value(&l.env, "AGENTDECK_TOKEN"), Some(token.expose()));
+            assert_eq!(value(&l.env, "AGENTDECK_PANE_ID"), Some("p7"));
+            assert!(!l.argv.iter().any(|a| a.contains(token.expose())));
+            assert!(!format!("{l:?}").contains(token.expose()));
+            // Still from scratch: nothing of agentdeck's own besides the allow-list and AGENTDECK_*.
+            assert!(!l.env.iter().any(|(_, v)| v == "sk-secret"));
+            assert_eq!(l.env.len(), 13);
         }
     }
 
     #[test]
     fn missing_binary_reports_install_command() {
         let cat = Catalogue::builtin().unwrap();
-        let err = agent(&cat, "codex", None, env(polluted, "/nonexistent")).unwrap_err();
+        let err = agent(&cat, "codex", None, env(polluted, "/nonexistent"), None).unwrap_err();
         assert_eq!(err.message, "codex tidak ditemukan di PATH.");
         assert_eq!(err.install.as_deref(), Some("npm install -g @openai/codex"));
-        assert!(agent(&cat, "nope", None, vec![]).is_err());
+        assert!(agent(&cat, "nope", None, vec![], None).is_err());
     }
 
     #[test]

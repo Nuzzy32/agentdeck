@@ -30,6 +30,7 @@ Terakhir diperbarui: 2026-10-22. **Phase 1 selesai.** Baca ini dulu saat melanju
 | T1.8 | `PaneManager::close_all` paralel (batas 5 s) di `RunEvent::Exit` (jendela terakhir, ⌘Q, `app.exit`); `terminate` memotret keturunan pane (`proc_listchildpids`) lalu `SIGHUP`+`SIGTERM`, `SIGKILL` setelah 3 s ke grup dan setiap keturunan | Tes: 3 pane × 7 keturunan (job abaikan HUP/TERM, `setsid`, foreground) habis dalam satu masa tenggang; crash (helper di-`SIGKILL`) membersihkan shell + job biasa. Batasan saat crash: ARCHITECTURE §12. Uji manual pemilik 2026-10-22 lulus: `sleep 601 &` + `claude` di shell, ⌘Q, tidak ada proses tersisa |
 | T2.5 | `tests/fake-agent` (std saja): mode claude/codex, bracketed paste, OSC 7501 sesuai Phase 0, `ASK` → blocked, `CALL` ke server MCP dengan token (dua versi protokol); `src-tauri/tests/fake_agent.rs` | 5 tes integrasi PTY memakai `status.rs` + `screen.rs` + `delivery.rs` + `mcp::server` |
 | T1.6 | `catalogue.rs` + `catalogue.toml`: katalog claude-code/codex, `PATH` dari `$SHELL -l -i -c` dengan penanda, deteksi + versi, penolakan flag bypass, argv dengan `--` | Terdeteksi di mesin pemilik: claude 2.1.306, codex 0.163.0 |
+| T2.3 | `panes.rs`: registri pane di core (id `pN` dari core, tidak dipakai ulang; workspace dari perintah UI dengan `peer_messaging` bawaan mati; agen/judul/cwd/induk; PTY; `Screen` diberi makan thread baca; status OSC terakhir; token hanya pane agen, dicabut saat keluar, ditutup, gagal jalan, atau dijalankan ulang; `list` = isi `pane_list` lewat `policy.rs`). Injeksi MCP di `launch::agent` (env `AGENTDECK_*`, argv katalog, token hanya di env, `Debug` env disamarkan). Server MCP memetakan token lewat registri. Perintah `pane_create`/`pane_close`/`workspace_create`/`workspace_close` di `panes.rs`; UI menerima id pane dan workspace dari core | Tes: unit registri (4), argv/env injeksi + tugas 16 KB diawali `-`, fake-agent lewat `panes::start` (`whoami` = id pane kedua mode, 401 setelah keluar/ditutup), 401 setelah tutup di `mcp_server.rs`. CLI asli lewat `panes::start` (harness sementara, tidak di-commit): Claude 2.1.308 dan Codex 0.163.0 `WHOAMI=p2`, tugas 16 KB utuh, tanpa prompt izin, `mcpServers` `~/.claude.json` dan shasum `~/.codex/config.toml` tetap. Belum diklik di `pnpm tauri dev` |
 | T1.7 | Peluncur (`src/launcher/`, ⌘T/⌘D/⌘⇧D/+, folder + 5 terakhir + dialog native D-021, tugas awal ⌘Enter), `launch.rs` (argv langsung, tugas setelah `--`, env dari nol), `pty.rs` menjawab `OSC 7501;?` dan mengirim event `status`/`exited` lewat `Channel` per pane, header status + tooltip `msg` + ikon galat, heuristik output, pita "selesai (kode N)" + Jalankan ulang / Buka shell di sini, "Gagal dijalankan" + Coba lagi, titik amber sidebar | Uji di `pnpm tauri dev` dengan harness sementara (salinan di catatan sesi `t1.7-e2e/`): alur A Claude (`memulai → siap`, dengan tugas `memulai → siap → bekerja → perlu login`), Codex (`memulai → siap`), CLI tidak terpasang (`SHELL=/bin/sh` → claude "Belum terpasang" + perintah pasang), config global tidak berubah. Uji manual pemilik 2026-10-22 lulus (peluncur Claude/Codex, Esc, pita + Jalankan ulang / Buka shell di sini, tampilan) |
 
 ## S6 throughput: selesai (D-018)
@@ -38,8 +39,8 @@ perintah `async`. Sumber referensi: `spikes/s6-throughput/`. Branch `spike/s6` m
 tidak di-merge); boleh dihapus dengan `git branch -D spike/s6`.
 
 ## Berikutnya
-- T2.3: injeksi MCP saat peluncuran (`launch::agent` kini memanggil `build_args(None, …)`; tinggal isi URL + env token).
-- Phase 2 sisa: T2.3 (injeksi saat peluncuran), T2.4 tool `pane_list`/`pane_read`, T2.6, T2.7 penyambungan, T2.8, T2.9.
+- T2.4 tool `pane_list` (pakai `Registry::list`) dan `pane_read` (pakai `Registry::screen` + `policy::can_read`), lalu hapus `whoami`.
+- Phase 2 sisa: T2.4 tool, T2.6, T2.7 penyambungan, T2.8, T2.9.
 
 
 ## Keputusan tertunda (pemilik)
@@ -77,4 +78,11 @@ tidak di-merge); boleh dihapus dengan `git branch -D spike/s6`.
   `memulai` lalu status OSC; (2) ⌘D → Codex dengan tugas awal, ⌘Enter; (3) Esc menutup peluncur; (4) di pane shell
   `exit 3` → pita, klik Jalankan ulang / Buka shell di sini; (5) tombol Salin perintah pasang (clipboard WebView);
   (6) lihat tampilan peluncur dan pita di tema gelap dan terang.
+- T2.3: uji CLI asli memakai mode izin bawaan pengguna; Claude pemilik berjalan dengan "auto mode on" (setelan
+  pengguna, bukan dari agentdeck), jadi "tanpa prompt izin" untuk Claude di run ini tidak membedakan `--allowedTools`
+  dari auto mode (S2 sudah membuktikan `--allowedTools`). Codex tanpa prompt karena `default_tools_approval_mode`.
+  Uji manual pemilik: `pnpm tauri dev`, luncurkan Claude Code lalu Codex dari peluncur, minta masing-masing
+  "panggil tool whoami dari server MCP agentdeck"; jawaban harus id pane di header (mis. `p2`) tanpa prompt izin.
+  Lalu Jalankan ulang setelah `/exit` (id tetap sama), tutup pane, dan bandingkan `jq -c .mcpServers ~/.claude.json |
+  shasum` serta `shasum ~/.codex/config.toml` sebelum/sesudah.
 - Commit tanpa atribusi AI (aturan global pemilik).

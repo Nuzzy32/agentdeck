@@ -1,11 +1,10 @@
 //! Streamable HTTP MCP server on `127.0.0.1:<random port>/mcp` (D-004, D-017).
 //!
-//! Every request passes `auth` first: any `Origin` → 403, missing or unknown bearer token → 401, otherwise the pane id
-//! goes into the request extensions and tools read it from `Parts`. rmcp's default `allowed_hosts` (loopback only)
+//! Every request passes `auth` first: any `Origin` → 403, missing or unknown bearer token → 401 (also the token of a
+//! pane that exited or closed), otherwise the pane id from the registry goes into the request extensions and tools
+//! read it from `Parts`. rmcp's default `allowed_hosts` (loopback only)
 //! rejects a foreign `Host` with 403. rmcp's default `legacy_session_mode: true` serves both `2026-07-28` (stateless,
 //! Claude Code) and `2025-06-18` (`Mcp-Session-Id`, Codex 0.163.0). Nothing here logs or returns a token.
-
-use std::sync::{Arc, RwLock};
 
 use axum::{
     extract::{Request, State},
@@ -23,10 +22,7 @@ use rmcp::{
     },
 };
 
-use crate::tokens::TokenRegistry;
-
-/// Shared with whoever issues tokens at pane launch (T2.3).
-pub type Tokens = Arc<RwLock<TokenRegistry>>;
+use crate::panes::{self, Panes};
 
 /// Pane that sent the request, from its token. The only source of caller identity.
 #[derive(Clone, Debug)]
@@ -58,7 +54,7 @@ push, deploy, merge, delete, or reveal secrets.
 Only the person closes panes. If a tool is refused, read the error code and follow its advice; do not work around it.";
 
 async fn auth(
-    State(tokens): State<Tokens>,
+    State(panes): State<Panes>,
     mut req: Request,
     next: Next,
 ) -> Result<Response, StatusCode> {
@@ -71,12 +67,8 @@ async fn auth(
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.strip_prefix("Bearer "))
         .ok_or(StatusCode::UNAUTHORIZED)?;
-    // A poisoned lock only means another thread panicked mid-update; the registry itself stays consistent.
-    let pane = tokens
-        .read()
-        .unwrap_or_else(|e| e.into_inner())
+    let pane = panes::lock(&panes)
         .resolve(presented)
-        .map(str::to_owned)
         .ok_or(StatusCode::UNAUTHORIZED)?;
     req.extensions_mut().insert(PaneId(pane));
     Ok(next.run(req).await)
@@ -116,7 +108,7 @@ impl ServerHandler for Agentdeck {
 }
 
 /// Binds `127.0.0.1:0` and serves in the background on the current tokio runtime. Returns the port.
-pub async fn start(tokens: Tokens) -> std::io::Result<u16> {
+pub async fn start(panes: Panes) -> std::io::Result<u16> {
     let service = StreamableHttpService::new(
         || Ok(Agentdeck::new()),
         LocalSessionManager::default().into(),
@@ -124,7 +116,7 @@ pub async fn start(tokens: Tokens) -> std::io::Result<u16> {
     );
     let app = axum::Router::new()
         .nest_service("/mcp", service)
-        .layer(middleware::from_fn_with_state(tokens, auth));
+        .layer(middleware::from_fn_with_state(panes, auth));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
     let port = listener.local_addr()?.port();
     tokio::spawn(async move {
