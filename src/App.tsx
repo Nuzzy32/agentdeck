@@ -512,6 +512,7 @@ function App() {
             workspace={activeView}
             messages={shared.messages}
             onDiscard={(id) => void act("Pesan tidak bisa dibuang", collab.drop(wsKey, id))}
+            onForce={(id) => void act("Pesan tidak bisa dikirim", collab.force(wsKey, id))}
           />
         ) : null}
       </div>

@@ -1,5 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { type CollabClient, createCollab, EMPTY, type LoopGuard, type MessageRow, pendingByPane } from "./messages";
+import {
+  type CollabClient,
+  createCollab,
+  EMPTY,
+  HELD_REFRESH_MS,
+  type LoopGuard,
+  type MessageRow,
+  pendingByPane,
+} from "./messages";
 
 const row = (id: string, state: MessageRow["state"], to = "p1"): MessageRow => ({
   id,
@@ -10,6 +18,7 @@ const row = (id: string, state: MessageRow["state"], to = "p1"): MessageRow => (
   state,
   reason: null,
   text: id,
+  held: false,
 });
 
 const flush = () => new Promise((r) => setTimeout(r, 0));
@@ -22,6 +31,7 @@ function fake(init: { rows?: MessageRow[]; guard?: LoopGuard; peer?: boolean } =
   const client = {
     messagesList: vi.fn(async (_ws: string) => core.rows),
     messageDrop: vi.fn(async (_id: string) => {}),
+    messageForce: vi.fn(async (_id: string) => {}),
     loopGuardGet: vi.fn(async (_ws: string) => core.guard),
     loopGuardContinue: vi.fn(async (_ws: string) => {}),
     loopGuardStop: vi.fn(async (_ws: string) => {}),
@@ -118,6 +128,38 @@ describe("messages", () => {
     await c.drop("1", "m1");
     expect(f.client.messageDrop).toHaveBeenCalledWith("m1");
     expect(c.get("1").messages[0].state).toBe("dropped");
+  });
+
+  it("Kirim sekarang forces by id and reloads", async () => {
+    const f = fake({ rows: [row("m1", "queued")] });
+    const c = createCollab(f.client);
+    await c.load("1");
+    f.core.rows = [row("m1", "delivered")];
+    await c.force("1", "m1");
+    expect(f.client.messageForce).toHaveBeenCalledWith("m1");
+    expect(c.get("1").messages[0].state).toBe("delivered");
+  });
+
+  it("reloads workspaces with waiting messages on a timer, so held shows up without an event", async () => {
+    vi.useFakeTimers();
+    try {
+      const f = fake({ rows: [row("m1", "queued")] });
+      const c = createCollab(f.client);
+      const stop = c.start();
+      await c.load("1");
+      f.core.rows = [{ ...row("m1", "queued"), held: true }];
+      await vi.advanceTimersByTimeAsync(HELD_REFRESH_MS);
+      expect(c.get("1").messages[0].held).toBe(true);
+      // Nothing waits any more: no further reloads.
+      f.core.rows = [row("m1", "delivered")];
+      await vi.advanceTimersByTimeAsync(HELD_REFRESH_MS);
+      const calls = f.client.messagesList.mock.calls.length;
+      await vi.advanceTimersByTimeAsync(HELD_REFRESH_MS * 3);
+      expect(f.client.messagesList).toHaveBeenCalledTimes(calls);
+      stop();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("counts waiting (queued, paused) messages per target pane for the chip", () => {

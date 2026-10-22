@@ -155,15 +155,17 @@ export function Sidebar({
   );
 }
 
-/** UI-UX §4.4. Copy goes to the clipboard; Discard goes to the core's queue. */
+/** UI-UX §4.4. Copy goes to the clipboard; Discard and Send now go to the core's queue. */
 export function MessagesPanel({
   workspace,
   messages,
   onDiscard,
+  onForce,
 }: {
   workspace: WorkspaceView;
   messages: PanelMessage[];
   onDiscard: (id: string) => void;
+  onForce: (id: string) => void;
 }) {
   return (
     <MessagesList
@@ -172,6 +174,7 @@ export function MessagesPanel({
       panes={workspace.panes}
       onCopy={(text) => void navigator.clipboard.writeText(text).catch(() => {})}
       onDiscard={onDiscard}
+      onForce={onForce}
     />
   );
 }

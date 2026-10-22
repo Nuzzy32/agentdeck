@@ -20,6 +20,8 @@ const AGENT_MAX_BYTES: usize = 32;
 pub const ENTER_DELAY: Duration = Duration::from_millis(150);
 pub const PASTE_START: &[u8] = b"\x1b[200~";
 pub const PASTE_END: &[u8] = b"\x1b[201~";
+/// A message waiting (queued or paused) this long is flagged in the Messages panel (MSG-07).
+pub const HELD_AFTER: Duration = Duration::from_secs(10 * 60);
 
 /// `quiet_ms` and `typing_ms` (§5.2). Defaults are unmeasured; tuned in T2.7 against the real CLIs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -264,6 +266,8 @@ struct Message {
     id: String,
     marker: String,
     body: String,
+    /// "Kirim sekarang": goes next and skips the idle, typing, and empty-input checks (MSG-07).
+    forced: bool,
 }
 
 #[derive(Debug, Default)]
@@ -313,6 +317,7 @@ impl Delivery {
             id: id.clone(),
             marker: marker(from),
             body,
+            forced: false,
         });
         let state = if guard.is_paused() {
             State::Paused
@@ -345,6 +350,16 @@ impl Delivery {
                 .map_or(target.last_output, |d| d.max(target.last_output)),
             ..*target
         };
+        // Forced: only exit, the loop guard, and bracketed paste still count.
+        let t = match q.items.front() {
+            Some(m) if m.forced => Target {
+                status: PaneStatus::Idle,
+                last_typed: None,
+                input: InputState::Empty,
+                ..t
+            },
+            _ => t,
+        };
         match ready(&t, guard.is_paused(), &self.timing, now) {
             Readiness::Wait(why) => Poll::Wait(why),
             Readiness::Drop(DropReason::NoBracketedPaste) => match q.items.pop_front() {
@@ -371,6 +386,18 @@ impl Delivery {
         self.queues.iter_mut().find_map(|(to, q)| {
             let i = q.items.iter().position(|m| m.id == id)?;
             q.items.remove(i);
+            Some(to.clone())
+        })
+    }
+
+    /// "Kirim sekarang": moves a waiting message to the front of its queue, marked forced; the target's worker pastes
+    /// it on its next poll. Returns its target, `None` when it already left the queue.
+    pub fn force(&mut self, id: &str) -> Option<String> {
+        self.queues.iter_mut().find_map(|(to, q)| {
+            let i = q.items.iter().position(|m| m.id == id)?;
+            let mut m = q.items.remove(i)?;
+            m.forced = true;
+            q.items.push_front(m);
             Some(to.clone())
         })
     }
@@ -422,7 +449,7 @@ enum Tick {
     Delivered(String),
 }
 
-fn epoch_ms(t: SystemTime) -> u64 {
+pub(crate) fn epoch_ms(t: SystemTime) -> u64 {
     t.duration_since(UNIX_EPOCH)
         .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
 }
@@ -585,6 +612,16 @@ impl Engine {
     pub fn guard_stop(&self, ws: u32) -> Option<GuardInfo> {
         let r = panes::lock(&self.panes).guard_stop(ws);
         self.released(r)
+    }
+
+    /// "Kirim sekarang". The paste goes out through the target's worker, so it never interleaves with another paste;
+    /// the outcome (delivered, or dropped with a reason) reaches the UI and the log like any delivery.
+    pub fn force(&self, id: &str) -> Result<(), String> {
+        let (to, start_worker) = panes::lock(&self.panes).force(id)?;
+        if start_worker {
+            self.spawn_worker(to);
+        }
+        Ok(())
     }
 
     /// "Buang". False when the message no longer waits.
@@ -1021,6 +1058,99 @@ mod tests {
             "dropped"
         );
         assert!(!DropReason::NoBracketedPaste.as_str().is_empty());
+    }
+
+    // ---- force (MSG-07) ----
+
+    #[test]
+    fn force_skips_busy_typing_and_input_and_keeps_fifo_for_the_rest() {
+        let mut d = Delivery::default();
+        let mut g = LoopGuard::default();
+        for t in ["a", "b", "c"] {
+            d.enqueue(&ME, "p2", t, &g).unwrap();
+        }
+        let t0 = Instant::now();
+        let stuck = Target {
+            status: PaneStatus::Busy,
+            last_typed: Some(t0),
+            input: InputState::HasText,
+            ..idle(t0)
+        };
+        assert_eq!(
+            d.poll("p2", &stuck, &mut g, 12, t0),
+            Poll::Wait(WaitReason::Busy)
+        );
+        assert_eq!(d.force("m2"), Some("p2".into()));
+        assert_eq!(d.force("m9"), None);
+        match d.poll("p2", &stuck, &mut g, 12, t0) {
+            Poll::Deliver { id, actions } => {
+                assert_eq!(id, "m2");
+                assert_eq!(
+                    actions,
+                    paste_actions(&marker(&ME), "b"),
+                    "same paste shape"
+                );
+            }
+            other => panic!("{other:?}"),
+        }
+        assert_eq!(g.count(), 1, "a forced delivery counts on the loop guard");
+        // The rest is not forced and keeps its order.
+        assert_eq!(
+            d.poll("p2", &stuck, &mut g, 12, t0),
+            Poll::Wait(WaitReason::Busy)
+        );
+        let later = t0 + Duration::from_secs(60);
+        for id in ["m1", "m3"] {
+            assert!(matches!(
+                d.poll("p2", &idle(t0), &mut g, 12, later),
+                Poll::Deliver { id: got, .. } if got == id
+            ));
+        }
+    }
+
+    #[test]
+    fn force_still_waits_for_loop_guard_and_drops_on_exit_or_no_bracketed_paste() {
+        let mut d = Delivery::default();
+        let mut g = LoopGuard::default();
+        for t in ["a", "b", "c"] {
+            d.enqueue(&ME, "p2", t, &g).unwrap();
+        }
+        let t0 = Instant::now();
+        // Paused: the forced message waits like the others.
+        g.record_delivered(1);
+        assert!(g.is_paused());
+        d.force("m1");
+        assert_eq!(
+            d.poll("p2", &idle(t0), &mut g, 12, t0),
+            Poll::Wait(WaitReason::Paused)
+        );
+        g.reset();
+        // Bracketed paste off: only the forced message is dropped, with its reason.
+        d.force("m3");
+        let no_paste = Target {
+            bracketed_paste: false,
+            input: InputState::HasText,
+            ..idle(t0)
+        };
+        assert_eq!(
+            d.poll("p2", &no_paste, &mut g, 12, t0),
+            Poll::Dropped(vec![("m3".into(), DropReason::NoBracketedPaste)])
+        );
+        // Exited: everything waiting is dropped.
+        d.force("m2");
+        let exited = Target {
+            alive: false,
+            ..idle(t0)
+        };
+        assert_eq!(
+            d.poll("p2", &exited, &mut g, 12, t0),
+            Poll::Dropped(
+                ["m2", "m1"]
+                    .map(|id| (id.to_string(), DropReason::TargetExited))
+                    .to_vec()
+            )
+        );
+        assert_eq!(g.count(), 0);
     }
 
     #[test]

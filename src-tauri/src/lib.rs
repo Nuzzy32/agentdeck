@@ -81,6 +81,16 @@ async fn message_drop(
     Ok(())
 }
 
+/// "Kirim sekarang" (MSG-07): the next paste to its target, without waiting for idle, typing, or an empty input box.
+/// Refused while the loop guard holds it. Blocks nothing: the target's worker pastes it.
+#[tauri::command]
+async fn message_force(
+    engine: tauri::State<'_, delivery::Engine>,
+    id: String,
+) -> Result<(), String> {
+    engine.force(&id)
+}
+
 #[tauri::command]
 async fn loop_guard_get(
     engine: tauri::State<'_, delivery::Engine>,
@@ -222,6 +232,7 @@ pub fn run() -> tauri::Result<()> {
             pty::pane_ack,
             messages_list,
             message_drop,
+            message_force,
             loop_guard_get,
             loop_guard_continue,
             loop_guard_stop,
