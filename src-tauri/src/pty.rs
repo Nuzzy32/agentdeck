@@ -11,7 +11,7 @@ use tauri::State;
 use tauri::ipc::{Channel, InvokeResponseBody};
 
 /// Max bytes sent to the WebView that xterm.js has not confirmed yet (D-018).
-pub const WINDOW: u64 = 256 << 10;
+pub const WINDOW: u64 = 128 << 10;
 /// Latest output kept for replay when a WebView (re)attaches; the oldest bytes are dropped.
 pub const REPLAY: usize = 1 << 20;
 /// Time between SIGTERM and SIGKILL on close.
@@ -376,6 +376,9 @@ mod tests {
         rx
     }
 
+    /// Chunks the reader sends before it waits: while sent - acked <= WINDOW, i.e. at 0, CHUNK, ..., WINDOW.
+    const PER_WINDOW: usize = WINDOW as usize / CHUNK + 1;
+
     const SHORT: Duration = Duration::from_millis(200);
     const LONG: Duration = Duration::from_secs(5);
 
@@ -384,9 +387,9 @@ mod tests {
         let out = Arc::new(Output::default());
         let (ch, rx) = sink();
         out.attach(ch);
-        let done = pusher(&out, 10);
-        // Sends while sent - acked <= WINDOW: 0, 64K, ..., 256K -> 5 chunks, then the reader waits.
-        for _ in 0..5 {
+        let n = PER_WINDOW;
+        let done = pusher(&out, 2 * n);
+        for _ in 0..n {
             assert_eq!(rx.recv_timeout(LONG).map(|b| b.len()), Ok(CHUNK));
         }
         assert!(
@@ -394,8 +397,8 @@ mod tests {
             "reader must stop at the window"
         );
         assert!(done.try_recv().is_err());
-        out.ack(5 * CHUNK as u64);
-        for _ in 0..5 {
+        out.ack((n * CHUNK) as u64);
+        for _ in 0..n {
             assert!(rx.recv_timeout(LONG).is_ok());
         }
         assert!(done.recv_timeout(LONG).is_ok());
@@ -406,21 +409,22 @@ mod tests {
         let out = Arc::new(Output::default());
         let (ch, rx) = sink();
         out.attach(ch);
-        let _done = pusher(&out, 10);
-        for _ in 0..5 {
+        let n = PER_WINDOW;
+        let _done = pusher(&out, 2 * n);
+        for _ in 0..n {
             assert!(rx.recv_timeout(LONG).is_ok());
         }
-        out.ack(5 * CHUNK as u64); // frees 5 more chunks
+        out.ack((n * CHUNK) as u64); // frees n more chunks
         out.ack(CHUNK as u64); // older total arriving late: must not shrink the window
-        for _ in 0..5 {
+        for _ in 0..n {
             assert!(
                 rx.recv_timeout(LONG).is_ok(),
                 "stale ack must not stall the reader"
             );
         }
-        assert_eq!(out.lock().acked, 5 * CHUNK as u64);
+        assert_eq!(out.lock().acked, (n * CHUNK) as u64);
         out.ack(u64::MAX); // more than was sent: clamped
-        assert_eq!(out.lock().acked, 10 * CHUNK as u64);
+        assert_eq!(out.lock().acked, (2 * n * CHUNK) as u64);
     }
 
     #[test]

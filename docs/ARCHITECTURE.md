@@ -75,7 +75,7 @@ throughput", channel "designed to be fast and deliver ordered data"). Input, res
    ke buffer putar ulang (1 MB terakhir, yang tertua dibuang), sehingga agen tidak pernah tertahan karena pane tidak
    tampil; saat WebView terpasang, buffer diputar ulang lalu flow control di bawah berlaku.
    **Flow control (D-018):** thread baca berhenti membaca bila byte yang terkirim tetapi belum dikonfirmasi xterm.js
-   melebihi jendela kredit (bawaan 256 KB); buffer kernel PTY lalu menahan program penghasil output. WebView
+   melebihi jendela kredit (128 KB, D-020); buffer kernel PTY lalu menahan program penghasil output. WebView
    mengirim `pane_ack {total}` berisi total kumulatif dari callback `term.write`, digabung paling banyak satu per
    putaran event loop lewat microtask (bukan `setTimeout`, yang ditahan WebKit saat jendela tersembunyi). Total
    kumulatif membuat ack yang hilang tertutup oleh ack berikutnya. Perintah `pane_write`/`pane_ack` `async` agar
@@ -315,7 +315,6 @@ dianggap selesai.
 | Tempelan maksimum (8192 + penanda) terkirim utuh. | T2.7 |
 | `tool_timeout_sec=330` membuat Codex menunggu kartu persetujuan; batas waktu tool MCP di Claude cukup panjang. | T3.2 |
 | Pane di workspace tidak aktif, jendela tersembunyi, atau diminimalkan tetap mengalir dan statusnya tetap terbaca (D-018 hanya mengukur jendela terlihat). | T1.4 |
-| Jendela kredit 256 KB memberi ketikan p95 < 50 ms dengan jendela terlihat di aplikasi nyata. | T1.4 |
 | `pane_read` pada alternate screen: `vt100` tidak punya scrollback di sana; `lines` dibatasi tinggi layar bila alternate screen aktif. | T2.4 |
 | Saran samar Claude bisa dibedakan dari teks biasa lewat atribut `vt100`; bila tidak, dicatat sebagai batasan `pane_read`. | T2.4 |
 | `SIGTERM`/`SIGKILL` ke grup proses dan `SIGHUP` saat crash menghentikan anak agen (Bash tool, server MCP stdio) yang mungkin membuat sesi sendiri. | T1.3, T1.8 |

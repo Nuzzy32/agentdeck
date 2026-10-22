@@ -230,6 +230,7 @@ di-commit). RTT ketikan kini diukur sampai callback `term.write` (setelah xterm.
   di bawah angka itu), tetapi banjir output di jendela tersembunyi menahan programnya.
 - `vim` (alternate screen, jumlah `~` = baris − 2) dan `top` menggambar sesuai ukuran pane; `stty size` = ukuran xterm
   setelah resize; `vim`/`top` menggambar ulang ke ukuran baru. Diperiksa dari isi buffer xterm.js, bukan tangkapan layar.
-**Tertunda (keputusan pemilik):** turunkan `WINDOW` di `pty.rs` ke 128 KB agar ketikan p95 < 50 ms saat pane lain
-dibanjiri output berwarna (throughput tidak berubah). Opsi untuk jendela tersembunyi bila nanti terasa: detach saat
+**Diputuskan pemilik (2026-10-22):** `WINDOW` di `pty.rs` diturunkan ke 128 KB agar ketikan p95 < 50 ms saat pane lain
+dibanjiri output berwarna (throughput tidak berubah). Tes kredit di `pty.rs` kini menghitung jumlah potongan dari
+`WINDOW`, jadi tetap benar bila angkanya disetel lagi. Opsi untuk jendela tersembunyi bila nanti terasa: detach saat
 `visibilitychange` → hidden dan pasang ulang saat terlihat (kehilangan scrollback di luar 1 MB putar ulang).
