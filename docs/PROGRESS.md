@@ -24,6 +24,7 @@ Terakhir diperbarui: 2026-10-22. **Phase 1 selesai.** Baca ini dulu saat melanju
 | OSC 7501 | `status.rs`: pemindai streaming, jawaban query, pemetaan status + label `kind` | Logika murni, disambungkan ke thread baca di T1.7 |
 | T1.4 | `TerminalPane` (`src/pane/`): xterm.js + fit + webgl (cadangan DOM), tema dan font dari token, `pane_attach` lewat `Channel` + ack kumulatif via microtask, `onData` → `pane_write` dengan penanda `typed` (ketikan/tempelan DOM vs balasan xterm), resize, unmount = detach; operasi per pane diserialkan (StrictMode); pane `p1` di aplikasi = shell sungguhan di `~` | S6 diukur ulang: D-020 (ketikan p95 53–62 ms dengan jendela 256 KB saat banjir output berwarna, 19–24 ms dengan 128 KB; keputusan tertunda) |
 | T2.2 | Server MCP (`src-tauri/src/mcp/`): rmcp + axum di `127.0.0.1:0`, token lewat `tokens.rs`, `Origin` apa pun 403, `Host` asing 403, protokol 2026-07-28 dan 2025-06-18, `instructions`, tool sementara `whoami` | 4 tes integrasi HTTP; server dimulai di `setup`, galat start tidak mematikan aplikasi; `whoami` dihapus di T2.4 |
+| T2.4 + T2.7 (core) | Tool MCP `pane_list`, `pane_read` (READ_RATE 30/menit, alternate screen ≤ tinggi layar), `pane_send` (`to` id atau `"parent"`, sanitasi + 8192 byte, FIFO maks 5, hasil `queued`/`delivered`/`paused`, semua kode galat MCP-TOOLS) di `mcp/tools.rs` dengan skema tulis tangan; galat = hasil tool `isError` `CODE: …`; `whoami` dihapus. Registri memegang antrean, catatan pesan, sakelar peer, pengaman putaran per workspace (satu kunci). `delivery::Engine`: worker per pane tujuan (syarat siap §5.2 dari status, layar, `typed_at`), tempelan ke PTY, log JSONL setiap status (tanpa token), event `agentdeck://messages-changed`/`agentdeck://loop-guard`, Enter orang (`pane_write` typed + `\r`) mengatur ulang. Perintah UI `messages_list`, `message_drop`, `loop_guard_get/continue/stop`, `workspace_set_peer/get_peer` | Tes: unit tool (setiap kode galat, relasi §5.4, READ_RATE, TOO_LARGE, QUEUE_FULL, anotasi), unit registri dengan jam palsu (antar, ketikan, input tidak kosong, jeda/Lanjutkan/Hentikan/Enter, Buang, keluar), HTTP `isError`, integrasi 3 fake-agent lewat `panes::start` + MCP (induk↔anak, peer `PEER_SEND_OFF` lalu lolos, ketikan ≥ `typing_ms`, pengaman putaran batas 2, keluar → dropped, JSONL tanpa token). CLI asli: lihat catatan kerja T2.7. `quiet_ms`/`typing_ms` belum disetel (bawaan 1500/2000). Belum dicoba di `pnpm tauri dev` (UI T2.8) |
 | T2.4 (sebagian) | `screen.rs`: `vt100` per pane, `read(lines)` (alternate screen dibatasi tinggi layar), bracketed paste, `input_state` Empty/HasText/Unknown untuk Claude dan Codex | "HasText" hanya diuji dengan byte buatan (belum ada log nyata berisi ketikan); tool `pane_read` belum |
 | T2.7 (sebagian) | `delivery.rs`: sanitasi, batas 8192 byte, penanda ≤ 256 byte, urutan tempel + 150 ms + Enter, FIFO maks 5, syarat siap dengan jam palsu, dropped saat keluar | Logika murni; disambungkan ke PTY/MCP di T2.7 |
 | T1.5 | Workspace sungguhan + pohon split (`src/layout/tree.ts`, `SplitView.tsx`), fokus, pintasan UI-UX §7 tanpa ⌘J (`keys.ts`), dialog tutup, toast, ukuran font terminal, seret pembatas; title bar overlay macOS | Data contoh `sample.ts` dihapus (tipe pindah ke `model.ts`); menu app diganti dari JS (`src/menu.ts`) karena menu bawaan Tauri memakai ⌘W untuk Close Window; diuji di `pnpm tauri dev` dengan harness sementara (54 cek, catatan kerja) Uji manual pemilik 2026-10-22 lulus: ⌘W dari keyboard fisik menutup pane (dialog), title bar overlay tidak menimpa teks dan bisa diseret. |
@@ -39,9 +40,9 @@ perintah `async`. Sumber referensi: `spikes/s6-throughput/`. Branch `spike/s6` m
 tidak di-merge); boleh dihapus dengan `git branch -D spike/s6`.
 
 ## Berikutnya
-- T2.4 tool `pane_list` (pakai `Registry::list`) dan `pane_read` (pakai `Registry::screen` + `policy::can_read`), lalu hapus `whoami`.
-- T2.7: `pane_send` + penyambungan `delivery.rs` ke PTY/`screen.rs`, log ke `store.rs` dan panel Pesan (T2.9 siap).
-- T2.8: pengaman putaran + sakelar "Saling kirim" di UI. T2.6: tinjau sisa (sebagian besar sudah di `status.rs` + T1.7).
+- T2.8: pengaman putaran + sakelar "Saling kirim" + panel Pesan di UI memakai perintah/event T2.7. T2.6: tinjau sisa.
+- Ulangi uji CLI asli T2.7 (`cargo test --test real_cli -- --ignored --nocapture`) saat Codex tidak "at capacity":
+  Claude mengerjakan permintaan dari tempelan, balasan yang mengutip baris terakhir tempelan 8 KB.
 
 
 ## Keputusan tertunda (pemilik)
@@ -87,3 +88,22 @@ tidak di-merge); boleh dihapus dengan `git branch -D spike/s6`.
   Lalu Jalankan ulang setelah `/exit` (id tetap sama), tutup pane, dan bandingkan `jq -c .mcpServers ~/.claude.json |
   shasum` serta `shasum ~/.codex/config.toml` sebelum/sesudah.
 - Commit tanpa atribusi AI (aturan global pemilik).
+- T2.7 uji CLI asli (2026-10-22, Claude Code 2.1.308, Codex 0.163.0, `src-tauri/tests/real_cli.rs`, env dari nol lewat
+  `panes::start`): Claude `idle` dalam 1 s; pesan core → Claude dan core → Codex langsung `delivered` (input kosong
+  terdeteksi di kedua TUI asli); Codex menampilkan satu tempelan 8286 karakter (8192 + penanda + `\n`), Claude
+  `[Pasted text #1 +215 lines]` lalu `working`. Codex menjawab "Selected model is at capacity" (model bawaan dan
+  `-m gpt-5.6-luna` lewat pembungkus di `PATH`, hanya untuk uji), jadi alur Codex → Claude → Codex tidak terjadi.
+  Temuan: Claude yang dijalankan di subfolder repo yang `CLAUDE.md`-nya mengimpor berkas dari akar repo menampilkan
+  dialog "Allow external CLAUDE.md file imports?" dan diam (`unknown`) sampai dijawab; uji memakai akar worktree
+  sebagai cwd. `mcpServers` `~/.claude.json` dan shasum `~/.codex/config.toml` sama sebelum/sesudah.
+- T2.7 keputusan kecil: id pesan `m<N>` per run; panel memakai catatan di memori untuk run ini (workspace id juga per
+  run), log JSONL tetap ditulis. `DropReason::Discarded` ditambah untuk "Buang". Setelah tempelan, status tujuan diset
+  `working` di core sampai laporan OSC berikutnya; agen yang tidak pernah melapor lagi setelah tempelan akan menahan
+  antreannya (belum terlihat pada kedua CLI). Worker yang menunggu memeriksa ulang tiap 100 ms.
+- `whoami` sudah tidak ada sejak T2.4; uji manual T2.3 kini memakai `pane_list` (`you` = id pane).
+  Uji manual pemilik T2.4/T2.7 (setelah UI T2.8 tergabung): `pnpm tauri dev`, buka Claude Code dan Codex di satu
+  workspace; minta Claude "panggil pane_list agentdeck" (Codex tampil sebagai `peer`, `can_send: false`); minta Claude
+  mengirim prompt ke Codex lewat pane_send → ditolak `PEER_SEND_OFF`; nyalakan "Agen boleh saling kirim" → terkirim,
+  tampil di Codex sebagai satu tempelan dengan baris `[agentdeck] message from p…`, dan di panel Pesan `delivered`;
+  ketik sesuatu di kotak input Codex lalu kirim lagi → panel `queued` sampai input dikosongkan; minta Claude
+  "pane_read layar Codex"; cek `~/Library/Application Support/<bundle-id>/logs/messages-*.jsonl` tanpa token.
