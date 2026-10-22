@@ -372,6 +372,18 @@
   }
 }
 
+.pane-term {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--bg);
+}
+/* Padding on .xterm, not the host: FitAddon measures the host and subtracts the .xterm padding. */
+.pane-term .xterm {
+  height: 100%;
+  padding: 4px 8px;
+}
+
 .pane-body {
   flex: 1;
   min-height: 0;

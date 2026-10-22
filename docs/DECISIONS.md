@@ -210,3 +210,26 @@ Tinjauan semua docs terhadap D-013–D-018 (44 temuan). Keputusan yang diambil:
 - OSC 7501 `blocked:kind=auth` dari Claude ("Login expired · Please run /login", terlihat saat uji di atas karena login
   CLI pemilik kedaluwarsa) ditampilkan sebagai "perlu login".
 Sisa klaim yang belum terbukti beserta task pengujinya: ARCHITECTURE §12.
+
+## D-020 — T1.4: S6 diukur ulang di aplikasi nyata (2026-10-22)
+Versi sama dengan D-018. Sumber: `TerminalPane` + `pty.rs` sungguhan di `pnpm tauri dev` (harness ukur sementara, tidak
+di-commit). RTT ketikan kini diukur sampai callback `term.write` (setelah xterm.js mengurai), lebih ketat daripada S6
+(saat byte tiba di channel). Jendela dibuat terlihat di semua Space; run yang jendelanya sempat tersembunyi tidak dihitung.
+- **Jendela kredit 256 KB, jendela terlihat:** `yes` 50 MB (75 MB byte terminal) 17,6 s (4,3 MB/s), jeda frame maks
+  40 ms, RTT ketikan p95 3 / maks 7 ms. Berkas berwarna 50 MB 6,0–6,3 s (8,0–8,4 MB/s), jeda frame maks 30–49 ms, lag
+  event loop maks ≤ 63 ms, **RTT ketikan p95 53–62 ms, maks 72–82 ms**: melewati target 50 ms. "write data discarded" 0
+  di semua run.
+- **Jendela kredit 128 KB (uji sementara, tidak di-commit):** berkas berwarna 6,3 s (8,0 MB/s, throughput praktis
+  sama), RTT ketikan p95 19–24 / maks 30–37 ms, 0 dibuang.
+- **Pane tanpa WebView tetap mengalir:** pane yang di-unmount (`pane_detach`) menuntaskan 50 MB `yes` dalam 17,8 s
+  (sama dengan saat terpasang; yang membatasi PTY kernel, bukan xterm.js) dan isinya muncul lagi dari buffer putar ulang
+  saat dipasang kembali. Pindah workspace di aplikasi = detach/attach, isi kembali utuh.
+- **Jendela diminimalkan atau disembunyikan, pane terpasang:** tetap mengalir tanpa macet dan tanpa data dibuang
+  (20 MB `yes` 8,1–8,4 s, ±3,7 MB/s). Tetapi bila jendela lama tersembunyi, berkas berwarna melambat sampai 1,1–1,4 MB/s:
+  xterm.js memecah penguraian dengan `setTimeout`, yang ditahan WebKit ±1 Hz. Agen tidak tertahan (output agen jauh
+  di bawah angka itu), tetapi banjir output di jendela tersembunyi menahan programnya.
+- `vim` (alternate screen, jumlah `~` = baris − 2) dan `top` menggambar sesuai ukuran pane; `stty size` = ukuran xterm
+  setelah resize; `vim`/`top` menggambar ulang ke ukuran baru. Diperiksa dari isi buffer xterm.js, bukan tangkapan layar.
+**Tertunda (keputusan pemilik):** turunkan `WINDOW` di `pty.rs` ke 128 KB agar ketikan p95 < 50 ms saat pane lain
+dibanjiri output berwarna (throughput tidak berubah). Opsi untuk jendela tersembunyi bila nanti terasa: detach saat
+`visibilitychange` → hidden dan pasang ulang saat terlihat (kehilangan scrollback di luar 1 MB putar ulang).

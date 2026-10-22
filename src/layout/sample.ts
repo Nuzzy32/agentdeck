@@ -13,6 +13,8 @@ export type Pane = {
   exitCode?: number;
   parent?: string;
   pending: number;
+  /** Core pane id (T1.4); sample panes have none and show a placeholder body. */
+  ptyId?: number;
 };
 
 export type Workspace = { name: string; folder: string; panes: Pane[] };

@@ -105,6 +105,8 @@ struct Pane {
     /// portable-pty calls setsid() in the child, so its pid is also its process group and session id.
     pgid: libc::pid_t,
     out: Arc<Output>,
+    /// Last write that came from the person's keyboard or paste, not an xterm.js reply (ARCHITECTURE §5.2).
+    typed_at: Mutex<Option<Instant>>,
 }
 
 #[derive(Default)]
@@ -181,6 +183,7 @@ impl PaneManager {
             writer: Mutex::new(writer),
             pgid,
             out: out.clone(),
+            typed_at: Mutex::new(None),
         };
         lock(&self.panes).insert(id, Arc::new(pane));
 
@@ -220,10 +223,19 @@ impl PaneManager {
             .ok_or_else(|| "no such pane".into())
     }
 
-    fn write(&self, id: u32, data: &[u8]) -> Result<(), String> {
+    fn write(&self, id: u32, data: &[u8], typed: bool) -> Result<(), String> {
         let pane = self.get(id)?;
+        if typed {
+            *lock(&pane.typed_at) = Some(Instant::now());
+        }
         let mut w = lock(&pane.writer);
         w.write_all(data).and_then(|_| w.flush()).map_err(err)
+    }
+
+    /// When the person last typed in the pane; Delivery's readiness check (`typing_ms`, T2.7) reads it.
+    #[allow(dead_code)]
+    fn typed_at(&self, id: u32) -> Result<Option<Instant>, String> {
+        Ok(*lock(&self.get(id)?.typed_at))
     }
 
     fn resize(&self, id: u32, rows: u16, cols: u16) -> Result<(), String> {
@@ -305,8 +317,9 @@ pub async fn pane_write(
     panes: State<'_, PaneManager>,
     id: u32,
     data: String,
+    typed: bool,
 ) -> Result<(), String> {
-    panes.write(id, data.as_bytes())
+    panes.write(id, data.as_bytes(), typed)
 }
 
 #[tauri::command]
@@ -509,11 +522,19 @@ mod tests {
         let (ch, rx) = sink();
         pm.attach(id, ch).unwrap();
         // The expansion makes the output differ from the echoed input.
-        pm.write(id, b"echo hi$((40+2))\n").unwrap();
+        pm.write(id, b"echo hi$((40+2))\n", false).unwrap();
         assert!(recv_until(&rx, "hi42"));
+        assert_eq!(
+            pm.typed_at(id),
+            Ok(None),
+            "a reply must not count as typing"
+        );
+        let before = Instant::now();
+        pm.write(id, b"\n", true).unwrap();
+        assert!(pm.typed_at(id).unwrap().is_some_and(|t| t >= before));
         pm.resize(id, 40, 120).unwrap();
         terminate(&pm.remove(id).unwrap());
-        assert!(pm.write(id, b"x").is_err());
+        assert!(pm.write(id, b"x", true).is_err());
     }
 
     fn assert_close_kills_tree(argv: &[String], setup: Option<&[u8]>, expect: usize) {
@@ -523,9 +544,9 @@ mod tests {
         if let Some(input) = setup {
             let (ch, rx) = sink();
             pm.attach(id, ch).unwrap();
-            pm.write(id, input).unwrap();
+            pm.write(id, input, false).unwrap();
             // Wait until the shell has run the next command, i.e. it is done registering the background job.
-            pm.write(id, b"echo ready-$((1+1))\n").unwrap();
+            pm.write(id, b"echo ready-$((1+1))\n", false).unwrap();
             assert!(recv_until(&rx, "ready-2"));
         }
         let mut tree = Vec::new();
