@@ -1,8 +1,13 @@
-//! T2.2: the MCP server over real HTTP. Auth/Origin/Host rejections, then `whoami` under both protocol versions.
+//! T2.2: the MCP server over real HTTP. Auth/Origin/Host rejections, then `pane_list` (whose `you` is the caller)
+//! under both protocol versions.
 //! T2.3: tokens come from the pane registry; a closed pane's token is refused.
 
+use std::sync::Arc;
+
+use agentdeck_lib::delivery::Engine;
 use agentdeck_lib::mcp::server::{self, INSTRUCTIONS};
 use agentdeck_lib::panes::{self, Panes, Spec};
+use agentdeck_lib::pty::PaneManager;
 use reqwest::{Client, Response, StatusCode};
 use serde_json::{Value, json};
 
@@ -15,6 +20,7 @@ struct Fixture {
 /// A registered agent pane with no process: enough for the server, which only maps tokens.
 pub fn agent(workspace: u32) -> Spec {
     Spec {
+        parent: None,
         workspace,
         pane: None,
         agent: Some("codex".into()),
@@ -38,7 +44,7 @@ async fn fixture() -> Fixture {
         };
         (open("p1"), open("p2"))
     };
-    let port = server::start(panes).await.unwrap();
+    let port = server::start(engine(panes)).await.unwrap();
     Fixture {
         url: format!("http://127.0.0.1:{port}/mcp"),
         p1,
@@ -68,8 +74,9 @@ fn post(
 
 /// JSON-RPC message from a JSON or SSE response body.
 async fn rpc(resp: Response) -> Value {
-    assert_eq!(resp.status(), StatusCode::OK);
+    let status = resp.status();
     let body = resp.text().await.unwrap();
+    assert_eq!(status, StatusCode::OK, "{body}");
     let data = body
         .lines()
         .filter_map(|l| l.strip_prefix("data:"))
@@ -77,6 +84,20 @@ async fn rpc(resp: Response) -> Value {
         .find(|d| !d.is_empty())
         .unwrap_or(&body);
     serde_json::from_str(data).unwrap()
+}
+
+/// No PTYs, no log, no UI: the server only needs the registry here.
+pub fn engine(panes: Panes) -> Engine {
+    Engine::new(panes, PaneManager::default(), None, Arc::new(|_| {}))
+}
+
+/// `you` of a `pane_list` result: the caller's pane id.
+fn you(msg: &Value) -> String {
+    let text = msg["result"]["content"][0]["text"]
+        .as_str()
+        .unwrap_or_default();
+    let list: Value = serde_json::from_str(text).unwrap_or_default();
+    list["you"].as_str().unwrap_or_default().to_owned()
 }
 
 fn init(version: &str) -> Value {
@@ -165,14 +186,14 @@ async fn legacy_2025_06_18_with_session() {
         let resp = post(&f.url, Some(token), &h, &note).send().await.unwrap();
         assert_eq!(resp.status(), StatusCode::ACCEPTED);
 
-        let call = json!({"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "whoami", "arguments": {}}});
+        let call = json!({"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "pane_list", "arguments": {}}});
         let msg = rpc(post(&f.url, Some(token), &h, &call).send().await.unwrap()).await;
-        assert_eq!(msg["result"]["content"][0]["text"], pane);
+        assert_eq!(you(&msg), pane);
 
         // Identity comes from the token, not the session: p1's session with p2's token answers p2.
         let other = if pane == "p1" { &f.p2 } else { &f.p1 };
         let msg = rpc(post(&f.url, Some(other), &h, &call).send().await.unwrap()).await;
-        assert_ne!(msg["result"]["content"][0]["text"], pane);
+        assert_ne!(you(&msg), pane);
         // A request without a token never reaches the session.
         let resp = post(&f.url, None, &h, &call).send().await.unwrap();
         assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
@@ -210,16 +231,16 @@ async fn stateless_2026_07_28() {
         assert_eq!(msg["result"]["instructions"], INSTRUCTIONS);
 
         let call = json!({"jsonrpc": "2.0", "id": 2, "method": "tools/call",
-            "params": {"name": "whoami", "arguments": {}, "_meta": meta}});
+            "params": {"name": "pane_list", "arguments": {}, "_meta": meta}});
         let h = [
             ("MCP-Protocol-Version", "2026-07-28"),
             ("Mcp-Method", "tools/call"),
-            ("Mcp-Name", "whoami"),
+            ("Mcp-Name", "pane_list"),
         ];
         let resp = post(&f.url, Some(token), &h, &call).send().await.unwrap();
         assert!(resp.headers().get("mcp-session-id").is_none());
         let msg = rpc(resp).await;
-        assert_eq!(msg["result"]["content"][0]["text"], pane, "{msg}");
+        assert_eq!(you(&msg), pane, "{msg}");
     }
     // A client that still opens with `initialize` naming 2026-07-28 gets a handshake version back, not an error.
     let msg = rpc(post(&f.url, Some(&f.p1), &[], &init("2026-07-28"))
@@ -243,7 +264,7 @@ async fn closed_pane_token_is_refused() {
     };
     let url = format!(
         "http://127.0.0.1:{}/mcp",
-        server::start(panes.clone()).await.unwrap()
+        server::start(engine(panes.clone())).await.unwrap()
     );
     let body = init("2025-06-18");
     let status = |t: &str| {
@@ -254,4 +275,50 @@ async fn closed_pane_token_is_refused() {
     panes::lock(&panes).close("p1");
     assert_eq!(status(&t1).await, StatusCode::UNAUTHORIZED);
     assert_eq!(status(&t2).await, StatusCode::OK);
+}
+
+/// T2.4/T2.7: tools are listed with their annotations, and a refused call is a tool result with `isError` and a
+/// `CODE: ...` text the agent can read, not a JSON-RPC error.
+#[tokio::test]
+async fn tools_listed_and_errors_are_tool_results() {
+    let f = fixture().await;
+    let meta = json!({
+        "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+        "io.modelcontextprotocol/clientInfo": {"name": "test", "version": "0"},
+        "io.modelcontextprotocol/clientCapabilities": {}
+    });
+    let h = |method: &'static str| {
+        [
+            ("MCP-Protocol-Version", "2026-07-28"),
+            ("Mcp-Method", method),
+        ]
+    };
+    let list =
+        json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {"_meta": meta}});
+    let msg = rpc(post(&f.url, Some(&f.p1), &h("tools/list"), &list)
+        .send()
+        .await
+        .unwrap())
+    .await;
+    let tools = msg["result"]["tools"].as_array().unwrap();
+    let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
+    assert_eq!(names, ["pane_list", "pane_read", "pane_send"], "{msg}");
+    assert_eq!(tools[1]["annotations"]["readOnlyHint"], true);
+    assert_eq!(tools[2]["annotations"]["destructiveHint"], false);
+
+    for (args, code) in [
+        (json!({"to": "p1", "text": "hi"}), "SELF: "),
+        (json!({"to": "p2", "text": "hi"}), "PEER_SEND_OFF: "),
+        (json!({"to": "p2"}), "BAD_ARGS: "),
+    ] {
+        let call = json!({"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+            "params": {"name": "pane_send", "arguments": args, "_meta": meta}});
+        let [v, m] = h("tools/call");
+        let hc = [v, m, ("Mcp-Name", "pane_send")];
+        let msg = rpc(post(&f.url, Some(&f.p1), &hc, &call).send().await.unwrap()).await;
+        assert_eq!(msg["result"]["isError"], true, "{msg}");
+        let text = msg["result"]["content"][0]["text"].as_str().unwrap();
+        assert!(text.starts_with(code), "{text}");
+        assert!(!text.contains(&f.p1), "no token in errors");
+    }
 }
