@@ -19,6 +19,10 @@ Terakhir diperbarui: 2026-10-22. Baca ini dulu saat melanjutkan, lalu `docs/IMPL
 | S6 throughput | Lulus dengan flow control (jendela kredit 256 KB, ack kumulatif) | D-018, `spikes/s6-throughput/` |
 | T0.7 | Tinjauan docs (44 temuan) diterapkan; sisa yang belum terbukti di ARCHITECTURE §12 | D-019 |
 | T1.2 | Token desain + layout statis (title bar, sidebar, pane, panel Pesan, status bar, keadaan awal) dengan data contoh | `src/styles/tokens.css`, `src/layout/`; title bar native masih tampil sampai `titleBarStyle: Overlay` dipasang di `tauri.conf.json` |
+| T1.3 | `PaneManager` (`src-tauri/src/pty.rs`): pane shell, tulis, resize, `pane_attach`/`pane_detach`, `pane_ack` kumulatif, jendela kredit 256 KB, buffer putar ulang 1 MB, `pane_close` | Tutup = `SIGHUP`+`SIGTERM` ke grup, `SIGKILL` setelah 3 s (lihat catatan kerja); belum dicoba di aplikasi (UI di T1.4) |
+| T2.1 | `tokens.rs` (token CSPRNG, waktu-konstan, Debug disamarkan) + `policy.rs` (relasi §5.4, spawn, batas + rentang, rate limit, pengaman putaran) | Logika murni, belum disambungkan ke MCP (T2.2–T3.2) |
+| OSC 7501 | `status.rs`: pemindai streaming, jawaban query, pemetaan status + label `kind` | Logika murni, disambungkan ke thread baca di T1.7 |
+| T1.6 | `catalogue.rs` + `catalogue.toml`: katalog claude-code/codex, `PATH` dari `$SHELL -l -i -c` dengan penanda, deteksi + versi, penolakan flag bypass, argv dengan `--` | Terdeteksi di mesin pemilik: claude 2.1.306, codex 0.163.0; belum disambungkan ke UI (T1.7) |
 
 ## S6 throughput: selesai (D-018)
 Lulus dengan flow control: jendela kredit 256 KB di Rust + `pane_ack` kumulatif dari callback `term.write` (microtask),
@@ -26,7 +30,11 @@ perintah `async`. Sumber referensi: `spikes/s6-throughput/`. Branch `spike/s6` m
 tidak di-merge); boleh dihapus dengan `git branch -D spike/s6`.
 
 ## Berikutnya
-- T1.3: `PaneManager` PTY + Channel dengan flow control (D-018).
+- T1.4: `TerminalPane` (xterm.js + flow control) memakai `pty.rs`; ukur ulang S6 dengan jendela terlihat.
+- T1.5: pohon split + workspace + pintasan (butuh T1.4).
+- T1.7: peluncur agen manual, menyambungkan `catalogue.rs` + `status.rs` ke thread baca `pty.rs` (butuh T1.5, T1.6).
+- T1.8: bersih-bersih saat aplikasi keluar.
+
 
 ## Keputusan tertunda (pemilik)
 - D-019: apakah kunci API (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`) boleh diteruskan ke agen lewat daftar izin.
@@ -35,4 +43,8 @@ tidak di-merge); boleh dihapus dengan `git branch -D spike/s6`.
 ## Catatan kerja
 - Jalankan spike agen dengan env bersih (`CLEAN` di PHASE-0 S1); sesi Claude Code membocorkan `CLAUDE_CODE_*`.
 - Server OpenAI sering "Selected model is at capacity"; untuk spike pakai `-m gpt-5.6-luna` atau `-m gpt-6-luna`.
+- T1.3: `pane_close` juga mengirim `SIGHUP`, bukan hanya `SIGTERM`: zsh interaktif mengabaikan `SIGTERM`, dan job
+  latar belakangnya (grup proses sendiri) hanya ikut berhenti lewat `SIGHUP` dari shell. Tanpa ini tes job latar gagal.
+  Thread baca tetap menguras PTY setelah tutup: di macOS proses yang keluar tertahan (`E`) sampai output-nya terbaca.
+- T1.2, T1.3, T2.1, OSC 7501, T1.6 dikerjakan paralel di lima sesi worktree lalu digabung (2026-10-22).
 - Commit tanpa atribusi AI (aturan global pemilik).
