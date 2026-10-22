@@ -2,7 +2,7 @@
 //! reader will be, plus `CALL pane_list` against `mcp::server::start` under both protocol versions. T1.7: the same agent
 //! in a real `PaneManager` pane, whose reader answers the query and reports status and exit code. T2.3: the agent
 //! launched through `panes::start` (catalogue argv, MCP injection, registry) gets its own pane id as `you` from
-//! `pane_list`.
+//! `pane_list`. T4.2: a child calls `pane_report` and its parent gets the RESULT paste.
 
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -929,4 +929,97 @@ fn send_p2_to_p3(panes: &Panes, pm: &PaneManager, p1: u32, ws: u32) {
             .last()
             .is_some_and(|m| m.text == "never delivered" && m.state == "queued")
     });
+}
+
+/// T4.2 end to end: a child (parent set directly in the registry, since `pane_spawn` is not there yet) calls
+/// `pane_report` over MCP; the parent gets one paste with the marker and the RESULT line, the report is kept as the
+/// child's last and the UI callback hears it once; a pane the person opened gets NO_PARENT.
+#[test]
+fn pane_report_reaches_parent_as_one_result_paste() {
+    use agentdeck_lib::mcp::report::Report;
+    use std::sync::Mutex;
+
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let panes = Panes::default();
+    let pm = PaneManager::default();
+    let heard: Arc<Mutex<Vec<Report>>> = Arc::default();
+    let sink = heard.clone();
+    let port = rt
+        .block_on(server::serve(
+            engine(panes.clone(), pm.clone()),
+            Arc::new(move |r| sink.lock().unwrap().push(r.clone())),
+        ))
+        .unwrap();
+    let url = format!("http://127.0.0.1:{port}/mcp");
+    let bin = fake_clis("t42");
+    let path = format!("{}:/usr/bin:/bin", bin.display());
+    let env = || launch::env(|k| std::env::var_os(k), &path);
+    let ws = panes::lock(&panes).create_workspace();
+    let start = |s: Spec| {
+        let started = panes::start(&panes, &pm, Some(&url), env(), &s, Box::new(|_| {})).unwrap();
+        wait_until(&format!("{} idle", started.pane), || {
+            status_of(&panes, &started.pane) == "idle"
+        });
+        started
+    };
+    let p1 = start(spec(ws, "claude-code", None));
+    let p2 = start(Spec {
+        parent: Some(p1.pane.clone()),
+        ..spec(ws, "codex", None)
+    });
+
+    let args = serde_json::json!({
+        "status": "done",
+        "summary": "fixed auth\nsee commit abc123",
+        "files": ["src/auth.rs", "tests/auth.rs"],
+        "tests": "pass"
+    });
+    pm.write(
+        p2.pty,
+        format!("CALL pane_report {args}\r").as_bytes(),
+        false,
+    )
+    .unwrap();
+    let marker = delivery::marker(&Sender {
+        pane: &p2.pane,
+        agent: "codex",
+        title: Some("t: codex"),
+    });
+    let body = "RESULT status=done files=src/auth.rs,tests/auth.rs tests=pass\nfixed auth\nsee commit abc123";
+    let n = marker.len() + 1 + body.len();
+    let text = wait_screen(&panes, &p1.pane, "result in p1", |t| {
+        t.contains(&format!("RECEIVED {n} bytes: {marker}"))
+    });
+    assert_eq!(count(&text, "RECEIVED"), 1, "{text}");
+    wait_screen(&panes, &p2.pane, "delivered", |t| {
+        t.contains(&esc("state", "delivered"))
+    });
+    let msgs = panes::lock(&panes).messages(ws);
+    assert_eq!(msgs.len(), 1);
+    assert_eq!(
+        (msgs[0].to.as_str(), msgs[0].text.as_str()),
+        (p1.pane.as_str(), body)
+    );
+
+    let last = panes::lock(&panes).report(&p2.pane).unwrap();
+    assert_eq!(
+        (last.status, last.tests, last.summary.as_str()),
+        ("done", "pass", "fixed auth\nsee commit abc123")
+    );
+    assert_eq!(last.files, ["src/auth.rs", "tests/auth.rs"]);
+    assert_eq!(heard.lock().unwrap().as_slice(), [last]);
+
+    // The person opened p1: no parent to report to.
+    wait_until("p1 idle", || status_of(&panes, &p1.pane) == "idle");
+    pm.write(
+        p1.pty,
+        format!("CALL pane_report {args}\r").as_bytes(),
+        false,
+    )
+    .unwrap();
+    wait_screen(&panes, &p1.pane, "NO_PARENT", |t| t.contains("NO_PARENT: "));
+    assert_eq!(panes::lock(&panes).report(&p1.pane), None);
+    assert_eq!(heard.lock().unwrap().len(), 1);
+    pm.close_all();
+    let _ = std::fs::remove_dir_all(&bin);
 }

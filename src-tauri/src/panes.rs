@@ -19,6 +19,7 @@ use crate::delivery::{
     self, Action, Delivery, DropReason, PaneStatus, Poll, Sender, State as MsgState, Target,
 };
 use crate::launch::{self, LaunchError, Mcp};
+use crate::mcp::report::Report;
 use crate::mcp::server::McpStatus;
 use crate::policy::{
     self, Limit, Limits, LoopGuard, PaneKind, PolicyError, READS_PER_MINUTE, Relation,
@@ -58,6 +59,8 @@ struct Entry {
     status: Option<&'static str>,
     started: Instant,
     exited: bool,
+    /// Last `pane_report` of this (child) pane; kept across restarts, gone when the pane closes.
+    report: Option<Report>,
 }
 
 impl Entry {
@@ -302,6 +305,7 @@ impl Registry {
                     status: None,
                     started: now,
                     exited: false,
+                    report: None,
                 });
                 (id, 0, None)
             }
@@ -378,6 +382,18 @@ impl Registry {
     /// Pane id owning `token`; `None` once the pane exited or closed.
     pub fn resolve(&self, token: &str) -> Option<String> {
         self.tokens.resolve(token).map(str::to_owned)
+    }
+
+    /// Keeps `r` as the last report of pane `r.pane`; no-op once that pane closed.
+    pub fn set_report(&mut self, r: Report) {
+        if let Some(e) = self.entry(&r.pane) {
+            e.report = Some(r);
+        }
+    }
+
+    /// `pane_report_last`.
+    pub fn report(&self, id: &str) -> Option<Report> {
+        self.panes.iter().find(|e| e.id == id)?.report.clone()
     }
 
     pub fn screen(&self, id: &str) -> Option<Arc<Mutex<Screen>>> {
