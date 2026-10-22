@@ -2,6 +2,7 @@ pub mod catalogue;
 pub mod mcp;
 pub mod policy;
 mod pty;
+pub mod screen;
 pub mod status;
 pub mod tokens;
 
