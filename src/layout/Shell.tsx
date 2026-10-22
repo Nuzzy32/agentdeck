@@ -1,7 +1,8 @@
 import { useEffect, useRef } from "react";
-import { Icon, IconButton, type IconName } from "./Icon";
+import { agentIcon, SHELL } from "../launcher/Launcher";
+import { Icon, IconButton } from "./Icon";
 import { nearLimit } from "./logic";
-import { AGENTS, LOOP_LIMIT, type Message, type Pane } from "./model";
+import { type AgentInfo, LOOP_LIMIT, type Message, type Pane } from "./model";
 import { StatusDot } from "./Pane";
 
 /** What the chrome shows of a workspace: its folder for display (`~/…`) and its panes in layout order. */
@@ -225,24 +226,32 @@ export function StatusBar({ loopCount }: { loopCount: number }) {
   );
 }
 
-const AGENT_ICON: Record<string, IconName> = { Shell: "terminal", "Claude Code": "sparkles", Codex: "bot" };
-
-export function EmptyState({ onStart }: { onStart: () => void }) {
+/** UI-UX §4.7. Each choice opens the launcher with that program selected; agents not yet checked show as such. */
+export function EmptyState({ agents, onStart }: { agents: AgentInfo[] | null; onStart: (choice: string) => void }) {
+  const choices = [
+    { id: SHELL, name: "Shell", installed: true as boolean | null },
+    ...(agents ?? [
+      { id: "claude-code", name: "Claude Code", installed: null },
+      { id: "codex", name: "Codex", installed: null },
+    ]),
+  ];
   return (
     <div className="empty">
       <h1 className="empty-title">Mulai kerja</h1>
       <div className="empty-choices">
-        {AGENTS.map((agent) => (
+        {choices.map((agent) => (
           <button
-            key={agent.name}
+            key={agent.id}
             type="button"
             className="empty-choice"
-            disabled={!agent.installed}
-            onClick={onStart}
+            disabled={agent.installed === false}
+            onClick={() => onStart(agent.id)}
           >
-            <Icon name={AGENT_ICON[agent.name] ?? "terminal"} size={20} />
+            <Icon name={agentIcon(agent.id)} size={20} />
             <span className="empty-choice-name">{agent.name}</span>
-            <span className={agent.installed ? "ok" : "faint"}>{agent.installed ? "Terpasang" : "Belum terpasang"}</span>
+            <span className={agent.installed ? "ok" : "faint"}>
+              {agent.installed === null ? "Memeriksa…" : agent.installed ? "Terpasang" : "Belum terpasang"}
+            </span>
           </button>
         ))}
       </div>

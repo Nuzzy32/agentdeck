@@ -577,6 +577,180 @@
   color: var(--bg);
 }
 
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.btn:disabled {
+  cursor: default;
+  color: var(--faint);
+}
+.btn-primary {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--bg);
+}
+.btn-small {
+  height: 22px;
+  padding: 0 8px;
+  font-size: var(--text-label-lg);
+}
+.input {
+  width: 100%;
+  min-width: 0;
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--fg);
+  font-size: var(--text-label-lg);
+  line-height: 18px;
+}
+textarea.input {
+  resize: vertical;
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* Copyable install command, UI-UX §5 */
+.install {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.install-cmd {
+  min-width: 0;
+  overflow-x: auto;
+  white-space: nowrap;
+  color: var(--fg);
+  font-size: var(--text-label-lg);
+  user-select: text;
+}
+
+/* Launcher, UI-UX §4.1 */
+.launcher {
+  width: 480px;
+  max-width: calc(100vw - 32px);
+}
+.launcher form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.launcher-programs {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 4px 0 0;
+  padding: 0;
+  border: 0;
+}
+.launcher-program {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+.launcher-program:has(input:checked) {
+  border-color: var(--accent);
+}
+.launcher-program-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+.launcher-program-label input {
+  margin: 0;
+  accent-color: var(--accent);
+}
+.launcher-program-name {
+  font-weight: 600;
+}
+.launcher-program-meta {
+  margin-left: auto;
+  font-size: var(--text-label-lg);
+}
+/* Dimmed by colour, not opacity, so the text keeps its contrast. */
+.launcher-program-off .launcher-program-label {
+  cursor: default;
+  color: var(--muted);
+}
+.launcher-program-off .install {
+  padding-left: 22px;
+}
+.launcher-note {
+  margin: 0;
+  font-size: var(--text-label-lg);
+}
+.launcher-field {
+  margin-top: 4px;
+  font-size: var(--text-label-lg);
+  font-weight: 600;
+}
+.launcher-row {
+  display: flex;
+  gap: 8px;
+}
+.launcher-row .btn {
+  flex: none;
+}
+.launcher-recents {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--text-label-lg);
+}
+.launcher-error {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: var(--danger);
+}
+
+/* Exited ribbon and failed body, UI-UX §3 */
+.pane-ribbon {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+  height: 32px;
+  padding: 0 8px;
+  background: var(--surface);
+  border-top: 1px solid var(--line);
+  white-space: nowrap;
+  overflow: hidden;
+}
+.pane-failed {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 16px;
+  color: var(--fg);
+}
+.pane-failed-text {
+  margin: 0;
+  color: var(--danger);
+}
+.pane-error {
+  display: inline-flex;
+  color: var(--danger);
+}
+
 /* Toasts, UI-UX §5 */
 .toasts {
   position: fixed;

@@ -29,7 +29,8 @@ Terakhir diperbarui: 2026-10-22. Baca ini dulu saat melanjutkan, lalu `docs/IMPL
 | T1.5 | Workspace sungguhan + pohon split (`src/layout/tree.ts`, `SplitView.tsx`), fokus, pintasan UI-UX §7 tanpa ⌘J (`keys.ts`), dialog tutup, toast, ukuran font terminal, seret pembatas; title bar overlay macOS | Data contoh `sample.ts` dihapus (tipe pindah ke `model.ts`); menu app diganti dari JS (`src/menu.ts`) karena menu bawaan Tauri memakai ⌘W untuk Close Window; diuji di `pnpm tauri dev` dengan harness sementara (54 cek, catatan kerja) Uji manual pemilik 2026-10-22 lulus: ⌘W dari keyboard fisik menutup pane (dialog), title bar overlay tidak menimpa teks dan bisa diseret. |
 | T1.8 | `PaneManager::close_all` paralel (batas 5 s) di `RunEvent::Exit` (jendela terakhir, ⌘Q, `app.exit`); `terminate` memotret keturunan pane (`proc_listchildpids`) lalu `SIGHUP`+`SIGTERM`, `SIGKILL` setelah 3 s ke grup dan setiap keturunan | Tes: 3 pane × 7 keturunan (job abaikan HUP/TERM, `setsid`, foreground) habis dalam satu masa tenggang; crash (helper di-`SIGKILL`) membersihkan shell + job biasa. Batasan saat crash: ARCHITECTURE §12. Uji manual pemilik 2026-10-22 lulus: `sleep 601 &` + `claude` di shell, ⌘Q, tidak ada proses tersisa |
 | T2.5 | `tests/fake-agent` (std saja): mode claude/codex, bracketed paste, OSC 7501 sesuai Phase 0, `ASK` → blocked, `CALL` ke server MCP dengan token (dua versi protokol); `src-tauri/tests/fake_agent.rs` | 5 tes integrasi PTY memakai `status.rs` + `screen.rs` + `delivery.rs` + `mcp::server` |
-| T1.6 | `catalogue.rs` + `catalogue.toml`: katalog claude-code/codex, `PATH` dari `$SHELL -l -i -c` dengan penanda, deteksi + versi, penolakan flag bypass, argv dengan `--` | Terdeteksi di mesin pemilik: claude 2.1.306, codex 0.163.0; belum disambungkan ke UI (T1.7) |
+| T1.6 | `catalogue.rs` + `catalogue.toml`: katalog claude-code/codex, `PATH` dari `$SHELL -l -i -c` dengan penanda, deteksi + versi, penolakan flag bypass, argv dengan `--` | Terdeteksi di mesin pemilik: claude 2.1.306, codex 0.163.0 |
+| T1.7 | Peluncur (`src/launcher/`, ⌘T/⌘D/⌘⇧D/+, folder + 5 terakhir + dialog native D-021, tugas awal ⌘Enter), `launch.rs` (argv langsung, tugas setelah `--`, env dari nol), `pty.rs` menjawab `OSC 7501;?` dan mengirim event `status`/`exited` lewat `Channel` per pane, header status + tooltip `msg` + ikon galat, heuristik output, pita "selesai (kode N)" + Jalankan ulang / Buka shell di sini, "Gagal dijalankan" + Coba lagi, titik amber sidebar | Uji di `pnpm tauri dev` dengan harness sementara (salinan di catatan sesi `t1.7-e2e/`): alur A Claude (`memulai → siap`, dengan tugas `memulai → siap → bekerja → perlu login`), Codex (`memulai → siap`), CLI tidak terpasang (`SHELL=/bin/sh` → claude "Belum terpasang" + perintah pasang), config global tidak berubah. Belum diklik dengan mouse/keyboard fisik oleh pemilik |
 
 ## S6 throughput: selesai (D-018)
 Lulus dengan flow control: jendela kredit di Rust (256 KB di D-018, diturunkan ke 128 KB di D-020) + `pane_ack` kumulatif dari callback `term.write` (microtask),
@@ -37,7 +38,8 @@ perintah `async`. Sumber referensi: `spikes/s6-throughput/`. Branch `spike/s6` m
 tidak di-merge); boleh dihapus dengan `git branch -D spike/s6`.
 
 ## Berikutnya
-- T1.7: peluncur agen manual, menyambungkan `catalogue.rs` + `status.rs` ke thread baca `pty.rs` (butuh T1.5, T1.6).
+- T1.7: uji manual pemilik (langkah di catatan kerja T1.7 di bawah).
+- T2.3: injeksi MCP saat peluncuran (`launch::agent` kini memanggil `build_args(None, …)`; tinggal isi URL + env token).
 - Phase 2 sisa: T2.3 (injeksi saat peluncuran), T2.4 tool `pane_list`/`pane_read`, T2.6, T2.7 penyambungan, T2.8, T2.9.
 
 
@@ -67,6 +69,13 @@ tidak di-merge); boleh dihapus dengan `git branch -D spike/s6`.
   sungguhan, tolak < 40×8, replay setelah detach, lalu `ps` memastikan tidak ada shell tertinggal. Belum dicoba dengan
   keyboard fisik (sesi agen tidak punya izin Accessibility/Screen Recording): pemilik perlu mencoba ⌘W sekali untuk
   memastikan menu bawaan tidak lagi menutup jendela, dan melihat title bar overlay (lampu jendela tidak menimpa teks).
-- T1.5: shell selalu dianggap masih berjalan (core belum mengirim event keluar), jadi ⌘W selalu bertanya; dilewati
-  untuk pane `exited` setelah T1.7. Workspace baru (⌘T) memakai folder workspace aktif (atau `~`) sampai peluncur T1.7.
+- T1.5 → T1.7: ⌘W tidak lagi bertanya untuk pane yang sudah keluar atau gagal; ⌘T/⌘D/⌘⇧D kini membuka peluncur.
+- T1.7: dijalankan dari sesi Claude Code, proses agentdeck membawa `CLAUDE_CODE_*`; `ps eww` pada anak `claude`/`codex`
+  menunjukkan nol variabel itu. Sekali (dari empat peluncuran Claude) Claude menampilkan "Gesticulating…" selama 60 s
+  tanpa pernah melapor `working`, jadi header tetap "siap"; tiga run lain melapor `idle → working → blocked:auth`
+  dengan benar. Kemungkinan perilaku Claude saat login kedaluwarsa; amati lagi setelah `/login`.
+  Uji manual pemilik: (1) ⌘T, pilih Claude Code dengan panah, folder lewat "Pilih…" (dialog native), Enter → header
+  `memulai` lalu status OSC; (2) ⌘D → Codex dengan tugas awal, ⌘Enter; (3) Esc menutup peluncur; (4) di pane shell
+  `exit 3` → pita, klik Jalankan ulang / Buka shell di sini; (5) tombol Salin perintah pasang (clipboard WebView);
+  (6) lihat tampilan peluncur dan pita di tema gelap dan terang.
 - Commit tanpa atribusi AI (aturan global pemilik).

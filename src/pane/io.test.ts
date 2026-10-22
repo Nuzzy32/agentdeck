@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { cumulativeAcker, inputClock, serial, TYPED_WINDOW_MS, writeQueue } from "./io";
+import { describe, expect, it, vi } from "vitest";
+import { activity, cumulativeAcker, inputClock, QUIET_MS, serial, TYPED_WINDOW_MS, writeQueue } from "./io";
 
 const tick = () => new Promise<void>((r) => setTimeout(r, 0));
 
@@ -77,5 +77,29 @@ describe("serial", () => {
     const last = serial(1, async () => order.push("attach2"));
     await Promise.allSettled([slow, failing, last]);
     expect(order).toEqual(["attach", "detach", "attach2"]);
+  });
+});
+
+describe("activity", () => {
+  it("reports busy on output and quiet one second after the last chunk", () => {
+    vi.useFakeTimers();
+    try {
+      const seen: boolean[] = [];
+      const a = activity((b) => seen.push(b), () => Date.now());
+      a.mark();
+      vi.advanceTimersByTime(600);
+      a.mark(); // keeps it busy without another report
+      vi.advanceTimersByTime(600);
+      expect(seen).toEqual([true]);
+      vi.advanceTimersByTime(QUIET_MS);
+      expect(seen).toEqual([true, false]);
+      a.mark();
+      a.dispose();
+      expect(seen).toEqual([true, false, true, false]);
+      vi.advanceTimersByTime(5 * QUIET_MS);
+      expect(seen).toHaveLength(4);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

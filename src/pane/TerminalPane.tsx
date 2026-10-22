@@ -4,7 +4,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { type ITheme, Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
-import { cumulativeAcker, inputClock, serial, writeQueue } from "./io";
+import { activity, cumulativeAcker, inputClock, serial, writeQueue } from "./io";
 
 function token(name: string): string {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
@@ -45,8 +45,21 @@ const INPUT_EVENTS = ["keydown", "paste", "input", "compositionend"];
  * xterm.js view of a core pane. The PTY is created by the caller (StrictMode runs this effect twice), so mounting only
  * attaches and unmounting only detaches: the process keeps running and the core buffers its output for replay.
  */
-export function TerminalPane({ id, focused, fontSize }: { id: number; focused: boolean; fontSize: number }) {
+export function TerminalPane({
+  id,
+  focused,
+  fontSize,
+  onActivity,
+}: {
+  id: number;
+  focused: boolean;
+  fontSize: number;
+  /** Output heuristic for the status dot: busy on output, quiet after a second without (ARCHITECTURE §6). */
+  onActivity: (busy: boolean) => void;
+}) {
   const host = useRef<HTMLDivElement>(null);
+  const activityCb = useRef(onActivity);
+  activityCb.current = onActivity;
   const term = useRef<{ t: Terminal; fit: FitAddon } | null>(null);
   // Read once at creation; later changes go through the fontSize effect without recreating the terminal.
   const initialFont = useRef(fontSize);
@@ -78,9 +91,11 @@ export function TerminalPane({ id, focused, fontSize }: { id: number; focused: b
     const ack = cumulativeAcker((total) => {
       if (live) invoke("pane_ack", { id, total }).catch(() => undefined);
     });
+    const busy = activity((b) => activityCb.current(b));
     const ch = new Channel<ArrayBuffer>();
     ch.onmessage = (buf) => {
       if (!live) return;
+      busy.mark();
       const bytes = new Uint8Array(buf);
       t.write(bytes, () => ack(bytes.length));
     };
@@ -106,6 +121,7 @@ export function TerminalPane({ id, focused, fontSize }: { id: number; focused: b
 
     return () => {
       live = false;
+      busy.dispose();
       scheme.removeEventListener("change", onScheme);
       ro.disconnect();
       onResize.dispose();

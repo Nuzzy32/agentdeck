@@ -77,3 +77,40 @@ export function serial<T>(id: number, op: () => Promise<T>): Promise<T> {
   );
   return next;
 }
+
+/** Output within this long counts as `working` for the status heuristic (ARCHITECTURE §6). */
+export const QUIET_MS = 1000;
+
+/**
+ * Status heuristic input: `onChange(true)` on the first output after a quiet spell, `onChange(false)` once QUIET_MS
+ * pass without output. One timer per pane however much output flows. `dispose` reports quiet if still busy.
+ */
+export function activity(onChange: (busy: boolean) => void, now: () => number = () => performance.now()) {
+  let busy = false;
+  let last = 0;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const check = () => {
+    const left = last + QUIET_MS - now();
+    if (left > 0) {
+      timer = setTimeout(check, left);
+      return;
+    }
+    timer = undefined;
+    busy = false;
+    onChange(false);
+  };
+  return {
+    mark: () => {
+      last = now();
+      if (!busy) {
+        busy = true;
+        onChange(true);
+      }
+      timer ??= setTimeout(check, QUIET_MS);
+    },
+    dispose: () => {
+      clearTimeout(timer);
+      if (busy) onChange(false);
+    },
+  };
+}

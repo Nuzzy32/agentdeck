@@ -1,5 +1,6 @@
 //! T2.5: `tests/fake-agent` in a real PTY, driven through `status.rs`, `screen.rs` and `delivery.rs` the way the pane
-//! reader will be, plus `CALL whoami` against `mcp::server::start` under both protocol versions.
+//! reader will be, plus `CALL whoami` against `mcp::server::start` under both protocol versions. T1.7: the same agent
+//! in a real `PaneManager` pane, whose reader answers the query and reports status and exit code.
 
 use std::io::{Read, Write};
 use std::path::PathBuf;
@@ -10,8 +11,10 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use agentdeck_lib::delivery::{self, Action, Delivery, PaneStatus, Poll, Sender, Target};
+use agentdeck_lib::launch::{self, Launch};
 use agentdeck_lib::mcp::server::{self, Tokens};
 use agentdeck_lib::policy::LoopGuard;
+use agentdeck_lib::pty::{PaneEvent, PaneManager};
 use agentdeck_lib::screen::{self, Screen};
 use agentdeck_lib::status::{AgentStatus, Event, Kind, QUERY_REPLY, Scanner, State, Tracker};
 use portable_pty::{Child, CommandBuilder, PtySize, native_pty_system};
@@ -361,4 +364,79 @@ fn call_whoami_under_both_protocols() {
     a.send(b"CALL whoami\r");
     a.wait_text("MCP ERROR HTTP 401");
     assert!(!a.screen.read(ROWS as usize).contains("not-a-token"));
+}
+
+/// Status events from a real `PaneManager` pane (T1.7), until one with `status` arrives.
+fn wait_status(rx: &Receiver<PaneEvent>, status: &str) -> PaneEvent {
+    let end = Instant::now() + WAIT;
+    loop {
+        let left = end.saturating_duration_since(Instant::now());
+        match rx.recv_timeout(left) {
+            Ok(ev @ PaneEvent::Status { status: s, .. }) if s == status => return ev,
+            Ok(PaneEvent::Exited { code }) => {
+                panic!("exited ({code:?}) while waiting for {status}")
+            }
+            Ok(_) => {}
+            Err(_) => panic!("timed out waiting for status {status}"),
+        }
+    }
+}
+
+/// T1.7: the pane reader itself answers `OSC 7501;?`, status changes reach the callback the WebView channel is built
+/// on, and the exit code is reported last.
+#[test]
+fn pane_manager_reports_status_and_exit_code_in_both_modes() {
+    for (mode, kind, msg) in [
+        (
+            "claude",
+            Some("permission"),
+            Some("approve Write: fake.txt"),
+        ),
+        ("codex", None, None),
+    ] {
+        let pm = PaneManager::default();
+        let (tx, rx) = mpsc::channel();
+        let launch = Launch {
+            argv: vec![
+                binary().to_str().unwrap().into(),
+                "--mode".into(),
+                mode.into(),
+            ],
+            env: launch::env(|k| std::env::var_os(k), "/usr/bin:/bin"),
+            osc_status: true,
+        };
+        let on_event = Box::new(move |ev| {
+            let _ = tx.send(ev);
+        });
+        let id = pm
+            .spawn(&launch, std::path::Path::new("/"), ROWS, COLS, on_event)
+            .unwrap();
+        // Claude mode only reports once the query is answered, so this also proves the reply.
+        wait_status(&rx, "idle");
+        pm.write(id, b"ASK\r", true).unwrap();
+        let blocked = wait_status(&rx, "needs_you");
+        assert_eq!(
+            blocked,
+            PaneEvent::Status {
+                status: "needs_you",
+                kind,
+                msg: msg.map(str::to_owned),
+                error: false
+            },
+            "{mode}"
+        );
+        pm.write(id, b"y", true).unwrap();
+        wait_status(&rx, "idle");
+        pm.write(id, b"EXIT 3\r", true).unwrap();
+        let end = Instant::now() + WAIT;
+        let exited = loop {
+            match rx.recv_timeout(end.saturating_duration_since(Instant::now())) {
+                Ok(PaneEvent::Exited { code }) => break code,
+                Ok(_) => {}
+                Err(_) => panic!("{mode}: no exit event"),
+            }
+        };
+        assert_eq!(exited, Some(3), "{mode}");
+        pm.close_all();
+    }
 }

@@ -32,6 +32,8 @@ axum = "0.8"
 tokio = { version = "1", features = ["net", "rt"] }
 # Headless terminal screen per pane (screen.rs); proven against both TUIs in spike S7 (D-013).
 vt100 = "0.18"
+# Native folder picker in the launcher (UI-UX §4.1, D-021). Official Tauri plugin; only `dialog:allow-open` granted.
+tauri-plugin-dialog = "2"
 
 [dev-dependencies]
 # HTTP client for the MCP integration test (tests/mcp_server.rs) only.

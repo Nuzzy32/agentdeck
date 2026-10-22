@@ -1,5 +1,6 @@
+import { useState } from "react";
 import { TerminalPane } from "../pane/TerminalPane";
-import { IconButton } from "./Icon";
+import { Icon, IconButton } from "./Icon";
 import { splitMiddle } from "./logic";
 import { type Pane, statusLabel } from "./model";
 
@@ -12,11 +13,39 @@ export function StatusDot({ pane }: { pane: Pane }) {
   );
 }
 
+/** Copyable install command for a missing CLI (UI-UX §5). The text stays selectable if the clipboard fails. */
+export function InstallHint({ command }: { command: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <span className="install">
+      <code className="mono install-cmd">{command}</code>
+      <button
+        type="button"
+        className="btn btn-small"
+        onClick={() =>
+          navigator.clipboard.writeText(command).then(
+            () => setCopied(true),
+            () => setCopied(false),
+          )
+        }
+      >
+        <Icon name="copy" size={12} />
+        {copied ? "Disalin" : "Salin"}
+      </button>
+    </span>
+  );
+}
+
 export type PaneActions = {
   onFocus: () => void;
   onSplit: (dir: "row" | "col") => void;
   onZoom: () => void;
   onClose: () => void;
+  onActivity: (busy: boolean) => void;
+  /** Same program again, in the same pane (exited or failed). */
+  onRestart: () => void;
+  /** Replace the exited program with a shell in its folder. */
+  onShellHere: () => void;
 };
 
 export function PaneView({
@@ -41,9 +70,14 @@ export function PaneView({
       onMouseDown={actions.onFocus}
     >
       <header className="pane-header">
-        <span className="pane-status" title={label}>
+        <span className="pane-status" title={pane.msg ?? label}>
           <StatusDot pane={pane} />
           <span className="pane-status-label">{label}</span>
+          {pane.error ? (
+            <span className="pane-error" role="img" aria-label="agen melapor galat" title="Agen melapor galat">
+              <Icon name="alert" size={12} />
+            </span>
+          ) : null}
         </span>
         <span className="mono pane-id">{pane.id}</span>
         <span className="pane-agent">{pane.agent}</span>
@@ -69,7 +103,33 @@ export function PaneView({
           <IconButton icon="x" label="Tutup pane (⌘W)" onClick={actions.onClose} />
         </span>
       </header>
-      <TerminalPane id={pane.ptyId} focused={focused} fontSize={fontSize} />
+      {pane.failed ? (
+        <div className="pane-body pane-failed" role="alert">
+          <p className="pane-failed-text">{pane.failed.message}</p>
+          {pane.failed.install ? <InstallHint command={pane.failed.install} /> : null}
+          <button type="button" className="btn" onClick={actions.onRestart}>
+            Coba lagi
+          </button>
+        </div>
+      ) : pane.ptyId !== null ? (
+        <TerminalPane id={pane.ptyId} focused={focused} fontSize={fontSize} onActivity={actions.onActivity} />
+      ) : (
+        <div className="pane-body" />
+      )}
+      {pane.status === "exited" ? (
+        <div className="pane-ribbon" role="status">
+          <span>
+            {pane.agent} selesai (kode {pane.exitCode ?? "?"})
+          </span>
+          <span className="pane-spacer" />
+          <button type="button" className="btn btn-small" onClick={actions.onRestart}>
+            Jalankan ulang
+          </button>
+          <button type="button" className="btn btn-small" onClick={actions.onShellHere}>
+            Buka shell di sini
+          </button>
+        </div>
+      ) : null}
     </section>
   );
 }

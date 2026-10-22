@@ -1,4 +1,5 @@
-//! Pane PTYs: spawn, input, resize, flow-controlled output (D-018), process-group shutdown (ARCHITECTURE §3).
+//! Pane PTYs: spawn, input, resize, flow-controlled output (D-018), OSC 7501 status (ARCHITECTURE §6), exit code,
+//! process-group shutdown (ARCHITECTURE §3).
 use std::collections::{HashMap, VecDeque};
 use std::io::{Read, Write};
 use std::path::Path;
@@ -7,8 +8,13 @@ use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 use portable_pty::{CommandBuilder, MasterPty, PtySize, native_pty_system};
+use serde::Serialize;
 use tauri::State;
 use tauri::ipc::{Channel, InvokeResponseBody};
+
+use crate::catalogue::{self, Catalogue};
+use crate::launch::{self, Launch, LaunchError};
+use crate::status::{self, AgentStatus, Kind, QUERY_REPLY, Report, Scanner, Tracker};
 
 /// Max bytes sent to the WebView that xterm.js has not confirmed yet (D-018).
 pub const WINDOW: u64 = 128 << 10;
@@ -18,10 +24,74 @@ pub const REPLAY: usize = 1 << 20;
 const KILL_GRACE: Duration = Duration::from_secs(3);
 /// Upper bound for `close_all`: KILL_GRACE, the 1 s wait after SIGKILL, and slack.
 const EXIT_LIMIT: Duration = Duration::from_secs(5);
-/// The only variables a pane inherits from agentdeck (D-014); TERM/COLORTERM are set explicitly.
-const PASS_ENV: [&str; 6] = ["HOME", "USER", "LOGNAME", "SHELL", "LANG", "PATH"];
 
 type Sink = Channel<InvokeResponseBody>;
+type Writer = Arc<Mutex<Box<dyn Write + Send>>>;
+
+/// What the core tells the WebView about a pane besides its bytes.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum PaneEvent {
+    /// Official status from OSC 7501 (ARCHITECTURE §6). `unknown`: the agent cleared it, the UI falls back to the
+    /// output heuristic. `kind` only matters for `needs_you`; `msg` is decoded agent text, for a tooltip only.
+    Status {
+        status: &'static str,
+        kind: Option<&'static str>,
+        msg: Option<String>,
+        error: bool,
+    },
+    /// The process exited; `None` when its status could not be read.
+    Exited { code: Option<u32> },
+}
+
+pub type OnEvent = Box<dyn Fn(PaneEvent) + Send>;
+
+fn status_event(report: Option<&Report>) -> PaneEvent {
+    let mapped = report.and_then(Report::mapped);
+    PaneEvent::Status {
+        status: match mapped.map(|m| m.status) {
+            Some(AgentStatus::Idle) => "idle",
+            Some(AgentStatus::Working) => "working",
+            Some(AgentStatus::NeedsYou) => "needs_you",
+            None => "unknown",
+        },
+        kind: report.and_then(|r| r.kind).map(|k| match k {
+            Kind::Permission => "permission",
+            Kind::Question => "question",
+            Kind::Auth => "auth",
+        }),
+        msg: report.and_then(|r| r.msg.clone()),
+        error: mapped.is_some_and(|m| m.error),
+    }
+}
+
+/// OSC 7501 per pane: answers queries (D-016) and reports each change of the root record.
+struct StatusScan {
+    scanner: Scanner,
+    tracker: Tracker,
+}
+
+impl StatusScan {
+    fn feed(&mut self, chunk: &[u8], writer: &Writer, on_event: &OnEvent) {
+        for ev in self.scanner.feed(chunk) {
+            match ev {
+                status::Event::Query => {
+                    // ponytail: blocks while a pane_write holds the writer on a full PTY input buffer; only an agent
+                    // that stops reading stdin while querying could stall here. Queue replies if that ever shows up.
+                    let mut w = lock(writer);
+                    let _ = w.write_all(QUERY_REPLY).and_then(|_| w.flush());
+                }
+                status::Event::Report(r) => {
+                    let before = self.tracker.current().cloned();
+                    self.tracker.apply(r);
+                    if self.tracker.current() != before.as_ref() {
+                        on_event(status_event(self.tracker.current()));
+                    }
+                }
+            }
+        }
+    }
+}
 
 #[derive(Default)]
 struct OutState {
@@ -103,7 +173,7 @@ impl Output {
 
 struct Pane {
     master: Mutex<Box<dyn MasterPty + Send>>,
-    writer: Mutex<Box<dyn Write + Send>>,
+    writer: Writer,
     /// portable-pty calls setsid() in the child, so its pid is also its process group and session id.
     pgid: libc::pid_t,
     out: Arc<Output>,
@@ -174,9 +244,17 @@ fn wait_until(deadline: Instant, pred: impl Fn() -> bool) -> bool {
 }
 
 impl PaneManager {
-    /// Runs `argv` directly, without a shell (D-009), with an environment built from scratch (D-014).
-    fn spawn(&self, argv: &[String], cwd: &Path, rows: u16, cols: u16) -> Result<u32, String> {
-        let (prog, args) = argv.split_first().ok_or("empty argv")?;
+    /// Runs `launch.argv` directly, without a shell (D-009), with exactly `launch.env` (D-014). `on_event` gets the
+    /// pane's status changes and, last, its exit.
+    pub fn spawn(
+        &self,
+        launch: &Launch,
+        cwd: &Path,
+        rows: u16,
+        cols: u16,
+        on_event: OnEvent,
+    ) -> Result<u32, String> {
+        let (prog, args) = launch.argv.split_first().ok_or("empty argv")?;
         let pair = native_pty_system()
             .openpty(PtySize {
                 rows,
@@ -189,13 +267,9 @@ impl PaneManager {
         cmd.args(args);
         cmd.cwd(cwd);
         cmd.env_clear();
-        for key in PASS_ENV {
-            if let Some(v) = std::env::var_os(key) {
-                cmd.env(key, v);
-            }
+        for (k, v) in &launch.env {
+            cmd.env(k, v);
         }
-        cmd.env("TERM", "xterm-256color");
-        cmd.env("COLORTERM", "truecolor");
         let mut child = pair.slave.spawn_command(cmd).map_err(err)?;
         drop(pair.slave);
         let pgid = child
@@ -208,17 +282,21 @@ impl PaneManager {
             return Err("child has no usable pid".into());
         };
         let mut reader = pair.master.try_clone_reader().map_err(err)?;
-        let writer = pair.master.take_writer().map_err(err)?;
+        let writer: Writer = Arc::new(Mutex::new(pair.master.take_writer().map_err(err)?));
         let out = Arc::new(Output::default());
         let id = self.next.fetch_add(1, Ordering::Relaxed);
         let pane = Pane {
             master: Mutex::new(pair.master),
-            writer: Mutex::new(writer),
+            writer: writer.clone(),
             pgid,
             out: out.clone(),
             typed_at: Mutex::new(None),
         };
         lock(&self.panes).insert(id, Arc::new(pane));
+        let mut scan = launch.osc_status.then(|| StatusScan {
+            scanner: Scanner::default(),
+            tracker: Tracker::default(),
+        });
 
         std::thread::Builder::new()
             .name(format!("pane-{id}-reader"))
@@ -229,24 +307,21 @@ impl PaneManager {
                         Ok(0) | Err(_) => break,
                         // Keep draining after close: on macOS an exiting process blocks in the tty close until
                         // its pending output is read, so stopping here would leave it stuck exiting.
-                        Ok(n) => out.push(&buf[..n]),
+                        Ok(n) => {
+                            // Before push: a query must be answered even while flow control holds the output.
+                            if let Some(scan) = &mut scan {
+                                scan.feed(&buf[..n], &writer, &on_event);
+                            }
+                            out.push(&buf[..n]);
+                        }
                     }
                 }
                 // Reap the child so it does not linger as a zombie (and so close sees the group empty).
-                let _ = child.wait();
+                let code = child.wait().ok().map(|s| s.exit_code());
+                on_event(PaneEvent::Exited { code });
             })
             .map_err(err)?;
         Ok(id)
-    }
-
-    /// `$SHELL -l` in `cwd`.
-    fn spawn_shell(&self, cwd: &str, rows: u16, cols: u16) -> Result<u32, String> {
-        let cwd = Path::new(cwd);
-        if !cwd.is_dir() {
-            return Err("cwd is not a directory".into());
-        }
-        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
-        self.spawn(&[shell, "-l".into()], cwd, rows, cols)
     }
 
     fn get(&self, id: u32) -> Result<Arc<Pane>, String> {
@@ -256,7 +331,7 @@ impl PaneManager {
             .ok_or_else(|| "no such pane".into())
     }
 
-    fn write(&self, id: u32, data: &[u8], typed: bool) -> Result<(), String> {
+    pub fn write(&self, id: u32, data: &[u8], typed: bool) -> Result<(), String> {
         let pane = self.get(id)?;
         if typed {
             *lock(&pane.typed_at) = Some(Instant::now());
@@ -357,14 +432,39 @@ fn terminate(pane: &Pane) {
     }
 }
 
+/// Shell (`agent` None) or a catalogue agent in `cwd`, with an optional first task (agents only). No MCP yet (T2.3).
 #[tauri::command]
-pub async fn pane_create_shell(
+pub async fn pane_create(
     panes: State<'_, PaneManager>,
+    agent: Option<String>,
     cwd: String,
+    task: Option<String>,
     rows: u16,
     cols: u16,
-) -> Result<u32, String> {
-    panes.spawn_shell(&cwd, rows, cols)
+    on_event: Channel<PaneEvent>,
+) -> Result<u32, LaunchError> {
+    let dir = Path::new(&cwd);
+    if !dir.is_dir() {
+        return Err(LaunchError::new(format!("Folder tidak ditemukan: {cwd}")));
+    }
+    let env = launch::env(|k| std::env::var_os(k), catalogue::login_path());
+    let launch = match agent {
+        None => launch::shell(env),
+        Some(id) => {
+            let cat = Catalogue::builtin().map_err(|e| LaunchError::new(e.to_string()))?;
+            launch::agent(&cat, &id, task.as_deref(), env)?
+        }
+    };
+    let on_event: OnEvent = Box::new(move |ev| {
+        let _ = on_event.send(ev);
+    });
+    panes
+        .spawn(&launch, dir, rows, cols, on_event)
+        .map_err(|e| {
+            let prog = launch.argv.first().map(String::as_str).unwrap_or_default();
+            let name = prog.rsplit('/').next().unwrap_or(prog);
+            LaunchError::new(format!("Tidak bisa menjalankan {name}: {e}"))
+        })
 }
 
 #[tauri::command]
@@ -562,15 +662,84 @@ mod tests {
         false
     }
 
-    fn argv(a: &[&str]) -> Vec<String> {
-        a.iter().map(|s| s.to_string()).collect()
+    /// `a` run directly with the from-scratch env (test process PATH) and no status scan.
+    fn argv(a: &[&str]) -> Launch {
+        let path = std::env::var("PATH").unwrap_or_default();
+        Launch {
+            argv: a.iter().map(|s| s.to_string()).collect(),
+            env: launch::env(|k| std::env::var_os(k), &path),
+            osc_status: false,
+        }
+    }
+
+    fn ignore() -> OnEvent {
+        Box::new(|_| {})
+    }
+
+    fn events() -> (OnEvent, Receiver<PaneEvent>) {
+        let (tx, rx) = channel();
+        (
+            Box::new(move |ev| {
+                let _ = tx.send(ev);
+            }),
+            rx,
+        )
+    }
+
+    #[test]
+    fn child_env_is_only_the_launch_env() {
+        let allowed: Vec<&str> = launch::INHERIT
+            .into_iter()
+            .chain(["PATH", "TERM", "COLORTERM"])
+            .collect();
+        // cargo runs tests with CARGO_* (and Claude Code sessions add CLAUDE_CODE_*): there is something to leak.
+        assert!(std::env::vars_os().any(|(k, _)| !allowed.iter().any(|a| k == *a)));
+        let pm = PaneManager::default();
+        let (on_event, done) = events();
+        let id = pm
+            .spawn(&argv(&["/usr/bin/env"]), Path::new("/"), 24, 200, on_event)
+            .unwrap();
+        assert!(matches!(
+            done.recv_timeout(LONG),
+            Ok(PaneEvent::Exited { .. })
+        ));
+        let (ch, rx) = sink();
+        pm.attach(id, ch).unwrap();
+        let out = String::from_utf8(rx.recv_timeout(LONG).unwrap()).unwrap();
+        let keys: Vec<&str> = out
+            .lines()
+            .filter_map(|l| l.split_once('='))
+            .map(|(k, _)| k)
+            .collect();
+        assert!(keys.contains(&"COLORTERM"), "{out}");
+        for k in keys {
+            assert!(allowed.contains(&k), "{k} leaked into the child");
+        }
+    }
+
+    #[test]
+    fn exit_code_is_reported() {
+        let pm = PaneManager::default();
+        let (on_event, rx) = events();
+        pm.spawn(
+            &argv(&["/bin/sh", "-c", "exit 7"]),
+            Path::new("/"),
+            24,
+            80,
+            on_event,
+        )
+        .unwrap();
+        assert_eq!(
+            rx.recv_timeout(LONG),
+            Ok(PaneEvent::Exited { code: Some(7) })
+        );
     }
 
     #[test]
     fn echo_appears_in_stream() {
         let pm = PaneManager::default();
         let id = pm
-            .spawn(&argv(&["/bin/sh"]), Path::new("/"), 24, 80)
+            .spawn(&argv(&["/bin/sh"]), Path::new("/"), 24, 80, ignore())
             .unwrap();
         let (ch, rx) = sink();
         pm.attach(id, ch).unwrap();
@@ -628,9 +797,9 @@ mod tests {
         }
     }
 
-    fn assert_close_kills_tree(argv: &[String], setup: Option<&[u8]>, expect: usize) {
+    fn assert_close_kills_tree(argv: &Launch, setup: Option<&[u8]>, expect: usize) {
         let pm = PaneManager::default();
-        let id = pm.spawn(argv, Path::new("/"), 24, 80).unwrap();
+        let id = pm.spawn(argv, Path::new("/"), 24, 80, ignore()).unwrap();
         if let Some(input) = setup {
             type_jobs(&pm, id, input);
         }
@@ -668,7 +837,7 @@ mod tests {
         let mut all = Vec::new();
         for _ in 0..3 {
             let id = pm
-                .spawn(&argv(&["/bin/zsh", "-f"]), Path::new("/"), 24, 80)
+                .spawn(&argv(&["/bin/zsh", "-f"]), Path::new("/"), 24, 80, ignore())
                 .unwrap();
             type_jobs(&pm, id, JOBS);
             pm.write(id, b"sleep 308\n", false).unwrap();
@@ -699,7 +868,7 @@ mod tests {
         let mut all = Vec::new();
         for _ in 0..2 {
             let id = pm
-                .spawn(&argv(&["/bin/zsh", "-f"]), Path::new("/"), 24, 80)
+                .spawn(&argv(&["/bin/zsh", "-f"]), Path::new("/"), 24, 80, ignore())
                 .unwrap();
             type_jobs(&pm, id, b"sh -c 'sleep 310; true' &\n");
             pm.write(id, b"sleep 311\n", false).unwrap();

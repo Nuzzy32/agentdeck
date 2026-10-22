@@ -234,3 +234,28 @@ di-commit). RTT ketikan kini diukur sampai callback `term.write` (setelah xterm.
 dibanjiri output berwarna (throughput tidak berubah). Tes kredit di `pty.rs` kini menghitung jumlah potongan dari
 `WINDOW`, jadi tetap benar bila angkanya disetel lagi. Opsi untuk jendela tersembunyi bila nanti terasa: detach saat
 `visibilitychange` → hidden dan pasang ulang saat terlihat (kehilangan scrollback di luar 1 MB putar ulang).
+
+## D-021 — T1.7: peluncur, dialog folder native, status di header (2026-10-22)
+- **`tauri-plugin-dialog` (2.x)** untuk tombol "Pilih…" di peluncur (UI-UX §4.1 meminta dialog folder native).
+  WebView tidak punya pemilih folder yang mengembalikan jalur absolut; plugin resmi Tauri ini satu-satunya cara tanpa
+  kode Objective-C sendiri. Menarik `rfd` dan `tauri-plugin-fs` ke pohon dependency. Izin yang diberikan hanya
+  `dialog:allow-open` (capability `default`); tidak ada izin fs.
+- **Tugas awal hanya lewat argv** (`<biner> -- <tugas>`, D-009/D-019), biner dicari dengan `find_in_path` di `PATH`
+  shell login lalu dijalankan dengan jalur absolut. Tidak terpasang → galat `"<biner> tidak ditemukan di PATH."` +
+  perintah pasang; peluncur tetap terbuka dan tidak ada pane rusak (PRD alur A).
+- **Env (D-014) ditambah `LANG=en_US.UTF-8` bila agentdeck tidak punya `LANG`** (aplikasi yang dibuka dari Finder),
+  sama seperti Terminal.app. Pane shell kini juga memakai env dari nol + `PATH` shell login (sebelumnya mewarisi
+  sebagian env proses agentdeck).
+- **Status:** pemindai OSC 7501 hanya berjalan di pane agen (shell tidak dipindai, jadi `claude` yang dijalankan manual
+  di pane shell tidak menjawab query dan tidak melapor). Event `status`/`exited` lewat `Channel` per pane (bukan event
+  global). Heuristik output (≤ 1 s → `working`, selain itu `unknown`) dihitung di WebView dari aliran byte pane yang
+  terpasang; pane di workspace yang tidak aktif tidak memakai heuristik (status resmi tetap jalan). Agen tetap
+  `starting` sampai laporan pertama, paling lama 5 s, lalu heuristik berlaku.
+- **"Jalankan ulang"** menjalankan agen yang sama di folder yang sama **tanpa** tugas awal (mengulang tugas bisa
+  mengulang pekerjaan). "Buka shell di sini" mengganti pane dengan shell di folder itu. Pane yang sudah keluar atau gagal
+  ditutup tanpa dialog.
+- Peluncur memakai `<dialog>` modal di tengah jendela, bukan di tengah pane tujuan: pane terkecil (40×8) lebih sempit
+  daripada peluncur. 5 folder terakhir disimpan di `localStorage` WebView.
+Diuji 2026-10-22 dengan Claude Code 2.1.306 dan Codex 0.163.0 di `pnpm tauri dev`: Claude `idle` setelah query
+dijawab; dengan tugas awal `idle → working → blocked:kind=auth` ("perlu login", login pemilik kedaluwarsa); Codex
+`idle`. Bagian `mcpServers` di `~/.claude.json` dan shasum `~/.codex/config.toml` sama sebelum/sesudah.
