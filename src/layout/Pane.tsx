@@ -1,3 +1,4 @@
+import { TerminalPane } from "../pane/TerminalPane";
 import { IconButton } from "./Icon";
 import { splitMiddle } from "./logic";
 import { type Pane, statusLabel } from "./sample";
@@ -44,9 +45,13 @@ export function PaneView({ pane, focused, onFocus }: { pane: Pane; focused: bool
           <IconButton icon="x" label="Tutup pane (⌘W)" />
         </span>
       </header>
-      <div className="pane-body mono">
-        {pane.agent} di {pane.folder} (terminal menyusul di T1.4)
-      </div>
+      {pane.ptyId !== undefined ? (
+        <TerminalPane id={pane.ptyId} focused={focused} />
+      ) : (
+        <div className="pane-body mono">
+          {pane.agent} di {pane.folder} (data contoh)
+        </div>
+      )}
     </section>
   );
 }
