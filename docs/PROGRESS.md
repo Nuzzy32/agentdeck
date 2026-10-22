@@ -27,6 +27,8 @@ Terakhir diperbarui: 2026-10-22. Baca ini dulu saat melanjutkan, lalu `docs/IMPL
 | T2.4 (sebagian) | `screen.rs`: `vt100` per pane, `read(lines)` (alternate screen dibatasi tinggi layar), bracketed paste, `input_state` Empty/HasText/Unknown untuk Claude dan Codex | "HasText" hanya diuji dengan byte buatan (belum ada log nyata berisi ketikan); tool `pane_read` belum |
 | T2.7 (sebagian) | `delivery.rs`: sanitasi, batas 8192 byte, penanda ≤ 256 byte, urutan tempel + 150 ms + Enter, FIFO maks 5, syarat siap dengan jam palsu, dropped saat keluar | Logika murni; disambungkan ke PTY/MCP di T2.7 |
 | T1.5 | Workspace sungguhan + pohon split (`src/layout/tree.ts`, `SplitView.tsx`), fokus, pintasan UI-UX §7 tanpa ⌘J (`keys.ts`), dialog tutup, toast, ukuran font terminal, seret pembatas; title bar overlay macOS | Data contoh `sample.ts` dihapus (tipe pindah ke `model.ts`); menu app diganti dari JS (`src/menu.ts`) karena menu bawaan Tauri memakai ⌘W untuk Close Window; diuji di `pnpm tauri dev` dengan harness sementara (54 cek, catatan kerja) |
+| T1.8 | `PaneManager::close_all` paralel (batas 5 s) di `RunEvent::Exit` (jendela terakhir, ⌘Q, `app.exit`); `terminate` memotret keturunan pane (`proc_listchildpids`) lalu `SIGHUP`+`SIGTERM`, `SIGKILL` setelah 3 s ke grup dan setiap keturunan | Tes: 3 pane × 7 keturunan (job abaikan HUP/TERM, `setsid`, foreground) habis dalam satu masa tenggang; crash (helper di-`SIGKILL`) membersihkan shell + job biasa. Batasan saat crash: ARCHITECTURE §12. Uji ⌘Q manual belum |
+| T2.5 | `tests/fake-agent` (std saja): mode claude/codex, bracketed paste, OSC 7501 sesuai Phase 0, `ASK` → blocked, `CALL` ke server MCP dengan token (dua versi protokol); `src-tauri/tests/fake_agent.rs` | 5 tes integrasi PTY memakai `status.rs` + `screen.rs` + `delivery.rs` + `mcp::server` |
 | T1.6 | `catalogue.rs` + `catalogue.toml`: katalog claude-code/codex, `PATH` dari `$SHELL -l -i -c` dengan penanda, deteksi + versi, penolakan flag bypass, argv dengan `--` | Terdeteksi di mesin pemilik: claude 2.1.306, codex 0.163.0; belum disambungkan ke UI (T1.7) |
 
 ## S6 throughput: selesai (D-018)
@@ -36,8 +38,10 @@ tidak di-merge); boleh dihapus dengan `git branch -D spike/s6`.
 
 ## Berikutnya
 - T1.7: peluncur agen manual, menyambungkan `catalogue.rs` + `status.rs` ke thread baca `pty.rs` (butuh T1.5, T1.6).
-- T1.8: bersih-bersih saat aplikasi keluar.
-- Phase 2 sisa: T2.3 (injeksi saat peluncuran), T2.4 tool `pane_list`/`pane_read`, T2.5 fake-agent, T2.6, T2.7 penyambungan, T2.8, T2.9.
+- Uji manual (pemilik, butuh klik): `pnpm tauri dev`, klik mulai, jalankan `sleep 601 &` dan `claude`, tekan ⌘Q, lalu
+  `pgrep -fl "sleep 601|claude"` harus kosong. Cek juga ⌘W dari keyboard fisik dan title bar overlay (lampu jendela
+  tidak menimpa teks, jendela bisa diseret).
+- Phase 2 sisa: T2.3 (injeksi saat peluncuran), T2.4 tool `pane_list`/`pane_read`, T2.6, T2.7 penyambungan, T2.8, T2.9.
 
 
 ## Keputusan tertunda (pemilik)
@@ -50,6 +54,11 @@ tidak di-merge); boleh dihapus dengan `git branch -D spike/s6`.
 - T1.3: `pane_close` juga mengirim `SIGHUP`, bukan hanya `SIGTERM`: zsh interaktif mengabaikan `SIGTERM`, dan job
   latar belakangnya (grup proses sendiri) hanya ikut berhenti lewat `SIGHUP` dari shell. Tanpa ini tes job latar gagal.
   Thread baca tetap menguras PTY setelah tutup: di macOS proses yang keluar tertahan (`E`) sampai output-nya terbaca.
+- T1.8: Bash tool Claude Code menjalankan setiap perintah di sesi sendiri, jadi `killpg` ke grup pane tidak
+  menjangkaunya; karena itu `terminate` juga mengirim sinyal ke setiap keturunan. Server MCP tidak dihentikan eksplisit
+  saat keluar (socket tertutup bersama proses). Risiko kecil: pid yang dipakai ulang selama masa tenggang 3 s bisa
+  ikut di-`SIGKILL` (komentar `ponytail:` di `pty.rs`).
+- T1.5, T1.8, T2.5 dikerjakan paralel di tiga sesi worktree lalu digabung (2026-10-22).
 - T1.4, T2.2, screen.rs, delivery.rs dikerjakan paralel di empat sesi worktree lalu digabung (2026-10-22). Saat
   menggabung, git menaruh `vt100` di bagian `[dev-dependencies]`; diperbaiki manual. Periksa `Cargo.toml` setiap merge.
 - T1.2, T1.3, T2.1, OSC 7501, T1.6 dikerjakan paralel di lima sesi worktree lalu digabung (2026-10-22).
