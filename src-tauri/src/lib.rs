@@ -8,9 +8,11 @@ pub mod policy;
 pub mod pty;
 pub mod screen;
 pub mod settings;
+pub mod spawn;
 pub mod status;
 pub mod store;
 pub mod tokens;
+pub mod worktree;
 
 /// The launcher's agent list (T1.6): installed or not, version, install command. Off the async runtime, since
 /// `--version` probes can take seconds.
@@ -304,6 +306,36 @@ fn approval_notify(handle: tauri::AppHandle) -> approvals::Notify {
     })
 }
 
+/// `pane_spawn` to the WebView: a child to place beside its parent, its status and exit, and refusals for a toast.
+fn spawn_notify(handle: tauri::AppHandle) -> spawn::Notify {
+    use tauri::Emitter;
+    std::sync::Arc::new(move |n| {
+        let _ = match n {
+            spawn::Notice::Spawned(s) => handle.emit("agentdeck://pane-spawned", s),
+            spawn::Notice::Event { pane, event } => {
+                handle.emit("agentdeck://pane-event", ChildEvent { pane, event })
+            }
+            spawn::Notice::Refused { pane, code, limit } => handle.emit(
+                "agentdeck://spawn-refused",
+                SpawnRefused { pane, code, limit },
+            ),
+        };
+    })
+}
+
+#[derive(Clone, serde::Serialize)]
+struct ChildEvent {
+    pane: String,
+    event: pty::PaneEvent,
+}
+
+#[derive(Clone, serde::Serialize)]
+struct SpawnRefused {
+    pane: String,
+    code: &'static str,
+    limit: Option<u32>,
+}
+
 #[derive(Clone, serde::Serialize)]
 struct ApprovalClosed {
     id: String,
@@ -358,25 +390,25 @@ pub fn run() -> tauri::Result<()> {
             let on_report: mcp::report::OnReport = std::sync::Arc::new(move |r| {
                 let _ = handle.emit("agentdeck://pane-report", r);
             });
+            let approvals = approvals::Approvals::new(approval_notify(app.handle().clone()));
+            let spawner =
+                spawn::Spawner::new(approvals.clone(), spawn_notify(app.handle().clone()));
             // A failed start leaves the app usable (agents run without MCP); the status bar shows "MCP mati".
-            let status =
-                match tauri::async_runtime::block_on(mcp::server::serve(engine.clone(), on_report))
-                {
-                    Ok(port) => mcp::server::McpStatus::Running { port },
-                    Err(e) => {
-                        eprintln!("agentdeck: MCP server not started: {e}");
-                        mcp::server::McpStatus::Off {
-                            reason: e.to_string(),
-                        }
+            let serve = mcp::server::serve_with(engine.clone(), on_report, Some(spawner));
+            let status = match tauri::async_runtime::block_on(serve) {
+                Ok(port) => mcp::server::McpStatus::Running { port },
+                Err(e) => {
+                    eprintln!("agentdeck: MCP server not started: {e}");
+                    mcp::server::McpStatus::Off {
+                        reason: e.to_string(),
                     }
-                };
+                }
+            };
             app.manage(panes);
             app.manage(pm);
             app.manage(engine);
             app.manage(status);
-            app.manage(approvals::Approvals::new(approval_notify(
-                app.handle().clone(),
-            )));
+            app.manage(approvals);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

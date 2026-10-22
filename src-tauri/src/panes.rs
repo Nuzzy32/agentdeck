@@ -22,11 +22,13 @@ use crate::launch::{self, LaunchError, Mcp};
 use crate::mcp::report::Report;
 use crate::mcp::server::McpStatus;
 use crate::policy::{
-    self, Limit, Limits, LoopGuard, PaneKind, PolicyError, READS_PER_MINUTE, Relation,
+    self, Limit, Limits, LoopGuard, PaneKind, PolicyError, READS_PER_MINUTE, Relation, SpawnRate,
 };
 use crate::pty::{self, OnEvent, PaneEvent, PaneManager};
 use crate::screen::Screen;
+use crate::store::Audit;
 use crate::tokens::{Token, TokenRegistry};
+use crate::worktree::{self, Worktree};
 
 /// Same as the WebView's `STARTING_MS`: an agent that has not reported by then is `unknown`.
 const STARTING: Duration = Duration::from_secs(5);
@@ -47,7 +49,7 @@ struct Entry {
     /// Catalogue id; `None` for a shell.
     agent: Option<String>,
     title: String,
-    #[allow(dead_code)] // read by pane_spawn (T3.2): a child's cwd must be inside its parent's
+    /// Folder the pane was opened in: a child's `cwd` must be inside its caller's (SPN-03).
     cwd: PathBuf,
     /// Set by `pane_spawn` (T3.2); `None` when the person opened the pane.
     parent: Option<String>,
@@ -61,6 +63,8 @@ struct Entry {
     exited: bool,
     /// Last `pane_report` of this (child) pane; kept across restarts, gone when the pane closes.
     report: Option<Report>,
+    /// `pane_spawn { worktree: true }`: cleaned up when the person closes the pane (T4.1).
+    worktree: Option<Worktree>,
 }
 
 impl Entry {
@@ -247,6 +251,26 @@ pub struct Registry {
     workers: HashSet<String>,
     /// `pane_read` call times per caller, for READ_RATE.
     reads: HashMap<String, VecDeque<Instant>>,
+    /// `pane_spawn` requests shown to the person in the last 10 minutes (app-wide, SPN-02).
+    spawn_rate: SpawnRate,
+    /// Caller of each `pane_spawn` between its card and its child's start: counts as a live child for the caps.
+    spawning: Vec<String>,
+}
+
+/// The `pane_spawn` caller as the spawn needs it.
+#[derive(Debug, Clone)]
+pub struct SpawnCaller {
+    pub workspace: u32,
+    pub agent: String,
+    pub cwd: PathBuf,
+}
+
+/// Result of [`Registry::close`].
+#[derive(Debug)]
+pub struct Closed {
+    pub workspace: u32,
+    pub pty: Option<u32>,
+    pub worktree: Option<Worktree>,
 }
 
 impl std::fmt::Debug for Entry {
@@ -317,6 +341,7 @@ impl Registry {
                     started: now,
                     exited: false,
                     report: None,
+                    worktree: None,
                 });
                 (id, 0, None)
             }
@@ -367,10 +392,11 @@ impl Registry {
         }
     }
 
-    /// Status and exit from the pane's reader thread. Exit revokes the token (ARCHITECTURE §3 step 4).
-    pub fn event(&mut self, id: &str, generation: u64, ev: &PaneEvent) {
+    /// Status and exit from the pane's reader thread. Exit revokes the token (ARCHITECTURE §3 step 4). False for an
+    /// event of an earlier process of the pane (or of a closed pane), which nobody should hear about.
+    pub fn event(&mut self, id: &str, generation: u64, ev: &PaneEvent) -> bool {
         let Some(e) = self.entry(id).filter(|e| e.generation == generation) else {
-            return;
+            return false;
         };
         match ev {
             PaneEvent::Status { status, .. } => {
@@ -381,13 +407,89 @@ impl Registry {
                 self.tokens.revoke(id);
             }
         }
+        true
     }
 
-    /// Removes the pane (only the person closes panes) and revokes its token. Returns its PTY to stop.
-    pub fn close(&mut self, id: &str) -> Option<u32> {
+    /// Removes the pane (only the person closes panes) and revokes its token. Returns its PTY to stop and its
+    /// worktree to clean up.
+    pub fn close(&mut self, id: &str) -> Option<Closed> {
         self.tokens.revoke(id);
         let i = self.panes.iter().position(|e| e.id == id)?;
-        self.panes.remove(i).pty
+        let e = self.panes.remove(i);
+        Some(Closed {
+            workspace: e.workspace,
+            pty: e.pty,
+            worktree: e.worktree,
+        })
+    }
+
+    /// Id the next new pane gets, unless another opens first (only used to name a worktree).
+    pub fn next_id(&self) -> String {
+        format!("p{}", self.next_pane + 1)
+    }
+
+    pub fn workspace_of(&self, id: &str) -> Option<u32> {
+        self.panes.iter().find(|e| e.id == id).map(|e| e.workspace)
+    }
+
+    /// The pane exists and its process has not exited (its token still resolves).
+    pub fn running(&self, id: &str) -> bool {
+        self.panes.iter().any(|e| e.id == id && !e.exited)
+    }
+
+    /// Gives pane `id` its worktree; hands it back when the pane closed meanwhile (the caller removes it).
+    pub fn set_worktree(&mut self, id: &str, wt: Worktree) -> Result<(), Worktree> {
+        match self.entry(id) {
+            Some(e) => {
+                e.worktree = Some(wt);
+                Ok(())
+            }
+            None => Err(wt),
+        }
+    }
+
+    /// `pane_spawn` limits for `caller` (`policy::check_spawn`, MCP-TOOLS order), counting spawns waiting for their
+    /// card or start as live children. With `reserve`, an accepted request takes a rate slot and a place in
+    /// `spawning` until [`Self::spawn_done`].
+    pub fn spawn_check(
+        &mut self,
+        caller: &str,
+        now: Instant,
+        enabled: bool,
+        reserve: bool,
+    ) -> Result<SpawnCaller, PolicyError> {
+        let e = self
+            .panes
+            .iter()
+            .find(|e| e.id == caller)
+            .ok_or(PolicyError::UnknownPane)?;
+        let me = e.policy();
+        let found = SpawnCaller {
+            workspace: e.workspace,
+            agent: e.agent.clone().unwrap_or_default(),
+            cwd: e.cwd.clone(),
+        };
+        let mut all: Vec<policy::Pane> = self.panes.iter().map(Entry::policy).collect();
+        all.extend(self.spawning.iter().map(|parent| policy::Pane {
+            id: String::new(),
+            workspace: String::new(),
+            kind: PaneKind::Agent,
+            parent: Some(parent.clone()),
+            exited: false,
+        }));
+        policy::check_spawn(&me, &all, &self.limits, &mut self.spawn_rate, now, enabled)?;
+        if reserve {
+            self.spawn_rate.record(now);
+            self.spawning.push(caller.to_owned());
+        }
+        Ok(found)
+    }
+
+    /// The reserved spawn of `caller` ended: refused, failed, or its child is now a pane of its own.
+    pub fn spawn_done(&mut self, caller: &str) {
+        if let Some(i) = self.spawning.iter().position(|c| c == caller) {
+            self.spawning.remove(i);
+        }
     }
 
     /// Pane id owning `token`; `None` once the pane exited or closed.
@@ -814,8 +916,9 @@ pub fn start(
         let panes = panes.clone();
         let id = id.clone();
         Box::new(move |ev| {
-            lock(&panes).event(&id, generation, &ev);
-            on_event(ev);
+            if lock(&panes).event(&id, generation, &ev) {
+                on_event(ev);
+            }
         })
     };
     let pty = pm
@@ -857,20 +960,46 @@ pub async fn pane_create(
     start(&panes, &pm, url.as_deref(), env, &spec, on_event)
 }
 
-/// Closes the pane: token revoked first, then the process group stopped. Unknown pane (failed launch) is a no-op.
+/// A child's worktree left in place on close because it has changes (UI-UX §5: told in a toast).
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct KeptWorktree {
+    pub path: String,
+    pub branch: String,
+    pub why: String,
+}
+
+/// Stops a closed pane's process, then removes its agent-made worktree when nothing changed (T4.1). Blocking.
+pub fn finish_close(pm: &PaneManager, closed: Closed) -> Option<KeptWorktree> {
+    if let Some(p) = closed.pty.and_then(|pty| pm.remove(pty).ok()) {
+        pty::terminate(&p);
+    }
+    let wt = closed.worktree?;
+    match worktree::cleanup(&wt) {
+        worktree::Cleanup::Removed => None,
+        worktree::Cleanup::Kept { why } => Some(KeptWorktree {
+            path: wt.path.display().to_string(),
+            branch: wt.branch,
+            why,
+        }),
+    }
+}
+
+/// Closes the pane: token revoked first, then the process group stopped, then a worktree without changes removed.
+/// Unknown pane (failed launch) is a no-op. Returns the worktree it kept, if any.
 #[tauri::command]
 pub async fn pane_close(
-    panes: State<'_, Panes>,
-    pm: State<'_, PaneManager>,
+    engine: State<'_, crate::delivery::Engine>,
     pane: String,
-) -> Result<(), String> {
-    let Some(p) = lock(&panes)
-        .close(&pane)
-        .and_then(|pty| pm.remove(pty).ok())
-    else {
-        return Ok(());
+) -> Result<Option<KeptWorktree>, String> {
+    let Some(closed) = lock(&engine.panes).close(&pane) else {
+        return Ok(None);
     };
-    tauri::async_runtime::spawn_blocking(move || pty::terminate(&p))
+    engine.audit(
+        &closed.workspace.to_string(),
+        &Audit::PaneClosed { pane: &pane },
+    );
+    let pm = engine.pm.clone();
+    tauri::async_runtime::spawn_blocking(move || finish_close(&pm, closed))
         .await
         .map_err(|e| e.to_string())
 }
@@ -969,9 +1098,9 @@ mod tests {
         let t3 = c.token.unwrap();
         assert!(!r.started("p2", b.generation, 8), "stale start");
         assert!(r.started("p2", c.generation, 9));
-        assert_eq!(r.close("p2"), Some(9));
+        assert_eq!(r.close("p2").and_then(|c| c.pty), Some(9));
         assert_eq!(r.resolve(t3.expose()), None, "close revokes");
-        assert_eq!(r.close("p2"), None);
+        assert!(r.close("p2").is_none());
 
         let d = r.open(&spec(ws, Some("codex"))).unwrap();
         let t4 = d.token.unwrap();

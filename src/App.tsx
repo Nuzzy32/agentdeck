@@ -42,6 +42,7 @@ import { serial } from "./pane/io";
 import { measureCell } from "./pane/TerminalPane";
 import { type Section, SettingsModal } from "./settings/SettingsModal";
 import { TerminalContext, useSettings } from "./settings/settings";
+import { type KeptWorktree, keptText, placeChild, refusedText, spawnClient } from "./spawn/spawned";
 
 function useWindowWidth(): number {
   const [width, setWidth] = useState(window.innerWidth);
@@ -158,6 +159,9 @@ function App() {
     () => measureCell(fontSize, term.font_family, term.line_height),
     [fontSize, term.font_family, term.line_height],
   );
+  // For the core's events, which arrive outside any render.
+  const latest = useRef({ home, cell });
+  latest.current = { home, cell };
   const sidebarOpen = panelOpen(width, SIDEBAR_BREAKPOINT, sidebar);
   const messagesOpen = active !== null && panelOpen(width, MESSAGES_BREAKPOINT, messages);
 
@@ -235,6 +239,60 @@ function App() {
       return { error: failed };
     }
   };
+
+  // Children opened by `pane_spawn` (T3.2): the core started them; they go beside their parent with an "anak pN" badge.
+  // Their status comes as events, since no Channel of ours created them. Refused spawns become a toast (UI-UX §5).
+  useEffect(() => {
+    const subs = [
+      spawnClient.onSpawned((s) => {
+        const spawn = ids.current.spawn++;
+        const pane: Pane = {
+          id: s.pane,
+          agentId: s.agent,
+          agent: s.agent_name,
+          title: s.title,
+          folder: tildePath(s.cwd, latest.current.home),
+          cwd: s.cwd,
+          status: "starting",
+          official: false,
+          startedAt: Date.now(),
+          pending: 0,
+          ptyId: s.pty,
+          spawn,
+          parent: s.parent,
+        };
+        setPanes((all) => ({ ...all, [s.pane]: pane }));
+        setWorkspaces((list) =>
+          list.map((w) => {
+            // Beside the parent; if the person closed it meanwhile, beside the focused pane of its workspace.
+            const at = leaves(w.tree).includes(s.parent) ? s.parent : w.id === s.workspace ? w.focused : null;
+            return at ? { ...w, tree: placeChild(w.tree, at, s.pane, area.current, latest.current.cell) } : w;
+          }),
+        );
+        setTimeout(
+          () =>
+            setPanes((all) => {
+              const p = all[s.pane];
+              return p?.spawn === spawn && p.status === "starting"
+                ? { ...all, [s.pane]: applyActivity(p, false, Date.now()) }
+                : all;
+            }),
+          STARTING_MS,
+        );
+      }),
+      spawnClient.onEvent((id, ev) =>
+        setPanes((all) => {
+          const p = all[id];
+          return p ? { ...all, [id]: applyEvent(p, ev) } : all;
+        }),
+      ),
+      spawnClient.onRefused((r) => {
+        const text = refusedText(r);
+        if (text) toast(text);
+      }),
+    ];
+    return () => subs.forEach((u) => void u.then((off) => off()));
+  }, []);
 
   const agentName = (id: string | null) => (id ? (agents?.find((a) => a.id === id)?.name ?? id) : "Shell");
 
@@ -359,10 +417,12 @@ function App() {
     }
     setPanes(({ [id]: _, ...others }) => others);
     // Also for a failed pane: the core forgets it and revokes its token. After pending writes to its PTY, if any.
-    const close = () => invoke("pane_close", { pane: id });
+    const close = () => invoke<KeptWorktree | null>("pane_close", { pane: id });
     const ptyId = pane.ptyId;
-    (ptyId === null ? close() : serial(ptyId, close)).catch((e: unknown) =>
-      toast(`${pane.agent} di ${pane.id} tidak bisa dihentikan: ${String(e)}`),
+    (ptyId === null ? close() : serial(ptyId, close)).then(
+      // A child's worktree with changes stays (T4.1).
+      (kept) => kept && toast(keptText(id, kept, tilde)),
+      (e: unknown) => toast(`${pane.agent} di ${pane.id} tidak bisa dihentikan: ${String(e)}`),
     );
   };
 

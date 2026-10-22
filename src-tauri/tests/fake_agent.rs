@@ -619,7 +619,9 @@ fn launch_path_injects_mcp_and_pane_list_answers_pane_id() {
 
     // Claude pane: the person closes it.
     assert_eq!(
-        panes::lock(&panes).close(&claude.0.pane),
+        panes::lock(&panes)
+            .close(&claude.0.pane)
+            .and_then(|c| c.pty),
         Some(claude.0.pty)
     );
     assert_eq!(status(&claude.1), reqwest::StatusCode::UNAUTHORIZED);
@@ -1120,4 +1122,254 @@ fn force_sends_over_typing_and_waits_for_loop_guard() {
     pm.close_all();
     let _ = std::fs::remove_dir_all(&bin);
     let _ = std::fs::remove_dir_all(&data);
+}
+
+fn git(dir: &Path, args: &[&str]) {
+    let ok = Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(args)
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_WORK_TREE")
+        .output()
+        .unwrap()
+        .status
+        .success();
+    assert!(ok, "git {args:?}");
+}
+
+/// T3.2 + T4.1 + T3.4 end to end (flow B with fake agents): `CALL pane_spawn` in p1 shows a card (Opened), the
+/// person's answer (what `approval_answer` does) starts the codex child through the normal launch path with p1 as
+/// parent; the call returns once it runs; the UI hears Spawned before the child's events; the child's
+/// `CALL pane_report` reaches p1 as a RESULT paste. A refused card is DENIED. `worktree: true` gives the child
+/// `.worktrees/<id>` on `agent/<id>`; closing removes it when unchanged and keeps it when changed. The audit log has
+/// every step and no token.
+#[test]
+fn pane_spawn_card_child_report_and_worktrees() {
+    use agentdeck_lib::approvals::{Approval, Approvals, Notice as Card};
+    use agentdeck_lib::settings::Settings;
+    use agentdeck_lib::spawn::{Notice, Spawner};
+    use agentdeck_lib::store::Store;
+    use std::sync::Mutex;
+
+    fn on() -> Settings {
+        Settings {
+            spawn_enabled: true,
+            ..Settings::default()
+        }
+    }
+
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let panes = Panes::default();
+    let pm = PaneManager::default();
+    let root = std::env::temp_dir().join(format!("agentdeck-t32-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    let repo = root.join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    for args in [
+        &["init", "--quiet", "-b", "main"][..],
+        &["config", "user.email", "t@example.com"],
+        &["config", "user.name", "t"],
+    ] {
+        git(&repo, args);
+    }
+    std::fs::write(repo.join("a.txt"), "a\n").unwrap();
+    git(&repo, &["add", "."]);
+    git(&repo, &["commit", "--quiet", "-m", "init"]);
+    let repo = repo.canonicalize().unwrap();
+    let engine = Engine::new(
+        panes.clone(),
+        pm.clone(),
+        Some(Store::new(&root.join("data"))),
+        Arc::new(|_| {}),
+    );
+    let cards: Arc<Mutex<Vec<Approval>>> = Arc::default();
+    let sink = cards.clone();
+    let approvals = Approvals::new(Arc::new(move |n| {
+        if let Card::Opened(a) = n {
+            sink.lock().unwrap().push(a);
+        }
+    }));
+    let heard: Arc<Mutex<Vec<Notice>>> = Arc::default();
+    let sink = heard.clone();
+    let bin = fake_clis("t32");
+    let path = format!("{}:/usr/bin:/bin", bin.display());
+    let child_path = path.clone();
+    let spawner = Spawner {
+        approvals: approvals.clone(),
+        url: String::new(),
+        env: Arc::new(move || launch::env(|k| std::env::var_os(k), &child_path)),
+        settings: on,
+        notify: Arc::new(move |n| sink.lock().unwrap().push(n)),
+    };
+    let port = rt
+        .block_on(server::serve_with(
+            engine.clone(),
+            Arc::new(|_| {}),
+            Some(spawner),
+        ))
+        .unwrap();
+    let url = format!("http://127.0.0.1:{port}/mcp");
+    let ws = panes::lock(&panes).create_workspace();
+    let p1 = panes::start(
+        &panes,
+        &pm,
+        Some(&url),
+        launch::env(|k| std::env::var_os(k), &path),
+        &Spec {
+            cwd: repo.display().to_string(),
+            ..spec(ws, "claude-code", None)
+        },
+        Box::new(|_| {}),
+    )
+    .unwrap();
+    wait_until("p1 idle", || status_of(&panes, &p1.pane) == "idle");
+
+    // Asks, waits for the card, answers it; returns the card.
+    let spawn = |args: serde_json::Value, allow: bool| -> Approval {
+        let before = cards.lock().unwrap().len();
+        pm.write(
+            p1.pty,
+            format!("CALL pane_spawn {args}\r").as_bytes(),
+            false,
+        )
+        .unwrap();
+        wait_until("card", || cards.lock().unwrap().len() > before);
+        let card = cards.lock().unwrap()[before].clone();
+        assert!(approvals.answer(&card.id, allow));
+        card
+    };
+
+    // 1. Approved: codex child p2 reviews and reports.
+    let report = serde_json::json!({"status": "done", "summary": "looks good", "tests": "pass"});
+    let task = format!("Review a.txt.\nCALL pane_report {report}");
+    let card = spawn(
+        serde_json::json!({"agent": "codex", "title": "review: a", "task": task}),
+        true,
+    );
+    assert_eq!(
+        (
+            card.pane.as_str(),
+            card.requester_agent.as_str(),
+            card.agent.as_str(),
+            card.title.as_str(),
+            card.task.as_str()
+        ),
+        ("p1", "Claude Code", "Codex", "review: a", task.as_str())
+    );
+    assert_eq!(card.cwd, repo.display().to_string());
+    assert_eq!(card.expires_at - card.created_at, 120_000);
+    wait_screen(&panes, "p1", "spawn result", |t| {
+        t.contains("MCP pane_spawn ->") && t.contains(&esc("status", "starting"))
+    });
+    assert!(panes::lock(&panes).screen("p1").is_some());
+    let list = panes::lock(&panes).list("p2").unwrap();
+    assert_eq!(
+        list.panes
+            .iter()
+            .map(|p| (p.id.as_str(), p.relation))
+            .collect::<Vec<_>>(),
+        [("p1", "parent"), ("p2", "you")]
+    );
+    let text = wait_screen(&panes, "p1", "RESULT", |t| {
+        t.contains("RESULT status=done files=- tests=pass")
+    });
+    assert!(text.contains("message from p2 (codex"), "{text}");
+    {
+        let h = heard.lock().unwrap();
+        let Notice::Spawned(s) = &h[0] else {
+            panic!("Spawned first: {h:?}")
+        };
+        assert_eq!(
+            (
+                s.pane.as_str(),
+                s.parent.as_str(),
+                s.workspace,
+                s.agent.as_str()
+            ),
+            ("p2", "p1", ws, "codex")
+        );
+        assert_eq!(s.cwd, repo.display().to_string());
+        assert!(
+            h[1..]
+                .iter()
+                .any(|n| matches!(n, Notice::Event { pane, .. } if pane == "p2")),
+            "{h:?}"
+        );
+    }
+
+    // 2. Denied.
+    wait_until("p1 idle", || status_of(&panes, "p1") == "idle");
+    spawn(
+        serde_json::json!({"agent": "codex", "title": "review: b", "task": "x"}),
+        false,
+    );
+    wait_screen(&panes, "p1", "DENIED", |t| t.contains("DENIED: "));
+
+    // 3. Worktree children: p3 unchanged (removed on close), p4 changed (kept).
+    let mut wts = Vec::new();
+    for title in ["wt: clean", "wt: dirty"] {
+        wait_until("p1 idle", || status_of(&panes, "p1") == "idle");
+        let card = spawn(
+            serde_json::json!({"agent": "codex", "title": title, "task": "hello", "worktree": true}),
+            true,
+        );
+        assert!(card.cwd.ends_with("(worktree baru)"), "{}", card.cwd);
+        let id = format!("p{}", 3 + wts.len());
+        wait_screen(&panes, "p1", "branch", |t| {
+            t.contains(&esc("branch", &format!("agent/{id}")))
+        });
+        let dir = repo.join(".worktrees").join(&id);
+        assert!(dir.join("a.txt").is_file());
+        wait_screen(&panes, &id, "child runs", |t| t.contains("hello"));
+        wts.push((id, dir));
+    }
+    std::fs::write(wts[1].1.join("b.txt"), "new").unwrap();
+    for (id, dir) in &wts {
+        let closed = panes::lock(&panes).close(id).unwrap();
+        let kept = panes::finish_close(&pm, closed);
+        if id == "p3" {
+            assert_eq!(kept, None);
+            assert!(!dir.exists(), "unchanged worktree removed");
+        } else {
+            let k = kept.expect("changed worktree kept");
+            assert_eq!(k.branch, "agent/p4");
+            assert!(dir.join("b.txt").is_file());
+        }
+    }
+
+    // Audit: every step, no token.
+    let token = read(bin.join("claude.token"));
+    let log = std::fs::read_dir(root.join("data/logs"))
+        .unwrap()
+        .map(|f| std::fs::read_to_string(f.unwrap().path()).unwrap())
+        .collect::<String>();
+    let events: Vec<String> = log
+        .lines()
+        .map(|l| {
+            serde_json::from_str::<serde_json::Value>(l).unwrap()["event"]
+                .as_str()
+                .unwrap_or("")
+                .to_owned()
+        })
+        .filter(|e| e.starts_with("spawn"))
+        .collect();
+    assert_eq!(
+        events,
+        [
+            "spawn_requested",
+            "spawn_approved",
+            "spawn_requested",
+            "spawn_denied",
+            "spawn_requested",
+            "spawn_approved",
+            "spawn_requested",
+            "spawn_approved"
+        ]
+    );
+    assert_eq!(token.len(), 64);
+    assert!(!log.contains(&token));
+    pm.close_all();
+    let _ = std::fs::remove_dir_all(&bin);
+    let _ = std::fs::remove_dir_all(&root);
 }

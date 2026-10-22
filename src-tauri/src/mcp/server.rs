@@ -29,6 +29,7 @@ use super::report::{OnReport, Reports};
 use super::tools;
 use crate::delivery::Engine;
 use crate::panes;
+use crate::spawn::Spawner;
 
 /// Pane that sent the request, from its token. The only source of caller identity.
 #[derive(Clone, Debug)]
@@ -49,6 +50,8 @@ pane_report (a child reports its result to its parent).
 
 Spawn only when work splits into independent parts, or when you want a second opinion from a DIFFERENT agent
 (e.g. codex reviews claude-code's work). Otherwise do the work yourself.
+To ask for a review: pane_spawn {agent: \"codex\", title: \"review: <module>\", task: ...}. pane_spawn returns once the
+child runs; then end your turn. Do not poll with pane_read: the child's result is pasted into your terminal.
 Give a child a complete task: goal, files it may change, how to verify, and how to report.
 Ask the child to finish by calling pane_report once; it reaches you as one line
   RESULT status=done|failed|blocked files=<paths> tests=pass|fail|none
@@ -85,6 +88,8 @@ async fn auth(
 struct Agentdeck {
     engine: Engine,
     reports: Reports,
+    /// `None`: `pane_spawn` answers SPAWN_OFF (tests that do not need it).
+    spawner: Option<Spawner>,
 }
 
 impl ServerHandler for Agentdeck {
@@ -117,11 +122,17 @@ impl ServerHandler for Agentdeck {
         let engine = self.engine.clone();
         let reports = self.reports.clone();
         let name = request.name.to_string();
-        let out = tokio::task::spawn_blocking(move || {
-            tools::call(&engine, &reports, &caller, &name, request.arguments)
-        })
-        .await
-        .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
+        // Waits for the person's card: on the runtime, so a cancelled call drops (and denies) the card.
+        let spawn = self.spawner.as_ref().filter(|_| name == "pane_spawn");
+        let out = if let Some(s) = spawn {
+            s.call(&engine, &caller, request.arguments).await
+        } else {
+            tokio::task::spawn_blocking(move || {
+                tools::call(&engine, &reports, &caller, &name, request.arguments)
+            })
+            .await
+            .map_err(|e| ErrorData::internal_error(e.to_string(), None))?
+        };
         Ok(match out {
             Ok(text) => CallToolResult::success(vec![ContentBlock::text(text)]),
             Err(text) => CallToolResult::error(vec![ContentBlock::text(text)]),
@@ -135,9 +146,23 @@ pub async fn start(engine: Engine) -> std::io::Result<u16> {
     serve(engine, std::sync::Arc::new(|_| {})).await
 }
 
-/// Binds `127.0.0.1:0` and serves in the background on the current tokio runtime. Returns the port.
-/// `on_report` hears every accepted `pane_report` (the UI event).
+/// [`serve_with`] without `pane_spawn`.
 pub async fn serve(engine: Engine, on_report: OnReport) -> std::io::Result<u16> {
+    serve_with(engine, on_report, None).await
+}
+
+/// Binds `127.0.0.1:0` and serves in the background on the current tokio runtime. Returns the port.
+/// `on_report` hears every accepted `pane_report` (the UI event); `spawner` serves `pane_spawn` and gets the URL.
+pub async fn serve_with(
+    engine: Engine,
+    on_report: OnReport,
+    mut spawner: Option<Spawner>,
+) -> std::io::Result<u16> {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+    let port = listener.local_addr()?.port();
+    if let Some(s) = &mut spawner {
+        s.url = format!("http://127.0.0.1:{port}/mcp");
+    }
     let tools_engine = engine.clone();
     let reports = Reports::new(on_report);
     let service = StreamableHttpService::new(
@@ -145,6 +170,7 @@ pub async fn serve(engine: Engine, on_report: OnReport) -> std::io::Result<u16> 
             Ok(Agentdeck {
                 engine: tools_engine.clone(),
                 reports: reports.clone(),
+                spawner: spawner.clone(),
             })
         },
         LocalSessionManager::default().into(),
@@ -153,8 +179,6 @@ pub async fn serve(engine: Engine, on_report: OnReport) -> std::io::Result<u16> 
     let app = axum::Router::new()
         .nest_service("/mcp", service)
         .layer(middleware::from_fn_with_state(engine, auth));
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
-    let port = listener.local_addr()?.port();
     tokio::spawn(async move {
         if let Err(e) = axum::serve(listener, app).await {
             eprintln!("agentdeck: MCP server stopped: {e}");
