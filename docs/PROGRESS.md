@@ -1,6 +1,53 @@
 # Progres dan titik lanjut
 
-Terakhir diperbarui: 2026-10-22. **Phase 1 selesai.** Baca ini dulu saat melanjutkan, lalu `docs/IMPLEMENTATION-PLAN.md`.
+Terakhir diperbarui: 2026-10-23. Phase 0–2 selesai; Phase 3 tinggal merge T3.2. Baca ini dulu saat melanjutkan, lalu `docs/IMPLEMENTATION-PLAN.md`.
+
+## Serah terima 2026-10-23 (baca ini dulu)
+
+**Langkah pertama:** branch `claude/t3-2-pane-spawn-aed3a3` (T3.2 `pane_spawn` + T3.4 audit + T4.1 worktree + uji alur B,
+D-024) sudah diperiksa sesi utama: semua cek lulus (166 unit, 11 fake-agent, 6 MCP, 89 Vitest), cakupan berkas benar,
+tanpa atribusi AI, `main` tidak disentuh. **Belum di-merge dan belum di-push; menunggu persetujuan pemilik.** Setelah
+setuju: `git merge --ff-only claude/t3-2-pane-spawn-aed3a3`, push, arsipkan sesinya, `git worktree remove
+.claude/worktrees/t3-2-pane-spawn-aed3a3`, `git branch -d claude/t3-2-pane-spawn-aed3a3`.
+
+**Belum terbukti (uji ulang):**
+- Codex sebagai peninjau di alur B, `tool_timeout_sec=330` di Codex (kartu dijawab > 60 s), dan Codex sebagai pemanggil
+  `pane_spawn`: server OpenAI terus "Selected model is at capacity" (juga `-m gpt-5.6-luna`).
+- Permintaan kerja dari Codex ke Claude (yang terbukti baru Claude → Codex dikerjakan).
+- Alur D: pita pengaman putaran di 12 pesan, Lanjutkan/Hentikan, dengan agen asli.
+- `pane_read` dipanggil agen asli; pesan menunggu saat kotak input berisi ketikan orang (baru di fake-agent).
+- Notifikasi macOS kartu persetujuan (perlu dilihat dan diklik pemilik).
+- 6 pane agen aktif di MacBook Air M1 8 GB tanpa UI tersendat.
+
+**Task tersisa:** T4.3 pulihkan tata letak; header laporan anak (UI dari T4.2, event `agentdeck://pane-report`);
+tinjau T2.6; Phase 5 (nama + bundle id final, signing + notarisasi, updater, ikon, cek ulang ketentuan provider D-006).
+
+**Risiko/batasan yang diketahui:**
+- Agen tujuan yang tidak pernah melapor status lagi setelah ditempeli pesan menahan antreannya (belum terlihat).
+- Saat aplikasi crash: proses yang mengabaikan SIGHUP atau membuat sesi sendiri (Bash tool Claude) bisa tertinggal;
+  pid yang dipakai ulang selama masa tenggang 3 s bisa ikut di-SIGKILL (`ponytail:` di `pty.rs`).
+- Worktree anak yang masih terbuka saat aplikasi keluar tidak dibersihkan.
+- `pane_read` mengembalikan saran samar Claude ("Try …") seperti teks biasa.
+- Claude di subfolder repo yang `CLAUDE.md`-nya mengimpor berkas di luar folder menampilkan dialog "Allow external
+  CLAUDE.md file imports?" dan diam sampai dijawab.
+- Jendela tersembunyi: WebKit menahan render; banjir output berwarna melambat (agen tidak tertahan).
+- Log Codex: thread judul mencatat `invalid transport in mcp_servers.agentdeck` (tidak memengaruhi sesi).
+
+**Keputusan tertunda pemilik:** D-019 (teruskan kunci API lewat daftar izin?), nama final + bundle id, distribusi
+pribadi atau publik.
+
+**Catatan lingkungan pemilik:**
+- Izin Accessibility + Screen Recording diberikan ke binary Claude Code di
+  `~/Library/Application Support/Claude/claude-code/2.1.299/4fa9694b7975/claude.app` (bukan Claude.app). Setelah Claude
+  Code diperbarui, path berganti versi dan izin mungkin perlu diberikan ulang. Dengan izin ini sesi bisa menguji UI
+  sendiri (cara: memori `agentdeck-ui-testing`).
+- Uji T3.5 membuat CLI menambah entri trust folder uji sementara di `~/.claude.json` dan `~/.codex/config.toml` (oleh
+  CLI, bukan agentdeck).
+
+**Cara kerja yang disepakati:** sesi paralel di worktree untuk task independen (brief melarang merge/push dengan tegas),
+uji gabungan di worktree sementara sebelum merge, cek `git reflog main` dan `grep '^## D-' docs/DECISIONS.md` setiap
+merge, hapus worktree begitu masuk main, commit tanpa atribusi AI, push hanya atas persetujuan pemilik. Memori proyek di
+`~/.claude/projects/-Users-adrian-dev-agentdeck/memory/` berisi aturan ini.
 
 ## Sudah selesai (di `main`, sudah di-push)
 | Task | Hasil | Catatan |
