@@ -1,21 +1,11 @@
-// Messages panel, UI-UX §4.4 (MSG-05). Driven by props: rows come from the message log (store.rs `MessageLine`),
-// Copy and Discard go back to the caller. Wiring to pane_send events is T2.7.
+// Messages panel, UI-UX §4.4 (MSG-05). Driven by props: rows come from `messages_list` (src/core/messages.ts),
+// Copy and Discard go back to the caller.
 import { useEffect, useState } from "react";
+import { isWaiting, type MessageRow, type MessageState } from "../core/messages";
 import "./messages.css";
 
-export type MessageState = "queued" | "delivered" | "paused" | "dropped";
-
-/** One message as `store::read_messages` returns it (field names match the JSONL log). */
-export type PanelMessage = {
-  message_id: string;
-  /** RFC 3339 UTC, e.g. `2026-10-22T14:09:03.120Z`. */
-  ts: string;
-  from: string;
-  to: string;
-  state: MessageState;
-  reason: string | null;
-  text: string;
-};
+/** A row as the panel needs it; the workspace is implied. */
+export type PanelMessage = Omit<MessageRow, "workspace">;
 
 export type PaneLabel = { id: string; agent: string; title: string };
 export type Filter = "all" | "waiting";
@@ -27,22 +17,19 @@ const STATE: Record<MessageState, { text: string; tone: string }> = {
   dropped: { text: "dibuang", tone: "danger" },
 };
 
-/** Messages the person can still discard; also what the "Menunggu" filter shows. */
-export const isWaiting = (m: PanelMessage) => m.state === "queued" || m.state === "paused";
-
 export const visible = (messages: PanelMessage[], filter: Filter) =>
   filter === "all" ? messages : messages.filter(isWaiting);
 
 /** Local `HH:MM`. */
-export function clock(ts: string): string {
+export function clock(ts: number): string {
   const d = new Date(ts);
   if (Number.isNaN(d.getTime())) return "--:--";
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 }
 
 /** How long a message has waited: `12 dtk`, `3 mnt`, `1 j 5 mnt`. */
-export function waited(ts: string, now: number): string {
-  const s = Math.max(0, Math.floor((now - new Date(ts).getTime()) / 1000)) || 0;
+export function waited(ts: number, now: number): string {
+  const s = Math.max(0, Math.floor((now - ts) / 1000)) || 0;
   if (s < 60) return `${s} dtk`;
   const m = Math.floor(s / 60);
   return m < 60 ? `${m} mnt` : `${Math.floor(m / 60)} j ${m % 60} mnt`;
@@ -71,7 +58,7 @@ export function MessageDetail({
           Salin
         </button>
         {isWaiting(m) ? (
-          <button type="button" className="btn btn-small msgs-discard" onClick={() => onDiscard(m.message_id)}>
+          <button type="button" className="btn btn-small msgs-discard" onClick={() => onDiscard(m.id)}>
             Buang
           </button>
         ) : null}
@@ -149,16 +136,16 @@ export function MessagesPanel({
         <ul className="list messages-list">
           {rows.map((m) => {
             const s = STATE[m.state];
-            const expanded = open === m.message_id;
-            const detail = `msg-detail-${m.message_id}`;
+            const expanded = open === m.id;
+            const detail = `msg-detail-${m.id}`;
             return (
-              <li key={`${m.ts}-${m.message_id}`} className={expanded ? "msgs-item msgs-open" : "msgs-item"}>
+              <li key={`${m.ts}-${m.id}`} className={expanded ? "msgs-item msgs-open" : "msgs-item"}>
                 <button
                   type="button"
                   className="message"
                   aria-expanded={expanded}
                   aria-controls={expanded ? detail : undefined}
-                  onClick={() => setOpen(expanded ? null : m.message_id)}
+                  onClick={() => setOpen(expanded ? null : m.id)}
                 >
                   <span className="message-line">
                     <span className="mono faint">{clock(m.ts)}</span>

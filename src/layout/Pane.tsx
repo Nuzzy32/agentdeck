@@ -90,7 +90,11 @@ export function PaneView({
         </span>
         <span className="pane-spacer" />
         {pane.parent ? <span className="badge pane-relation">anak {pane.parent}</span> : null}
-        {pane.pending > 0 ? <span className="badge chip">{pane.pending} pesan</span> : null}
+        {pane.pending > 0 ? (
+          <span className="badge chip" title={`${pane.pending} pesan menunggu dikirim ke ${pane.id}`}>
+            {pane.pending} pesan
+          </span>
+        ) : null}
         <span className="pane-actions">
           <IconButton icon="splitRight" label="Split kanan (⌘D)" onClick={() => actions.onSplit("row")} />
           <IconButton icon="splitDown" label="Split bawah (⌘⇧D)" onClick={() => actions.onSplit("col")} />

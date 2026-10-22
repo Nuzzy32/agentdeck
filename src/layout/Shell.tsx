@@ -1,9 +1,10 @@
-import { useEffect, useRef } from "react";
+import { type Ref, useEffect, useId, useRef } from "react";
+import type { LoopGuard } from "../core/messages";
 import { agentIcon, SHELL } from "../launcher/Launcher";
 import { Icon, IconButton } from "./Icon";
 import { nearLimit } from "./logic";
 import { MessagesPanel as MessagesList, type PanelMessage } from "../messages/MessagesPanel";
-import { type AgentInfo, LOOP_LIMIT, type Pane } from "./model";
+import type { AgentInfo, Pane } from "./model";
 import { StatusDot } from "./Pane";
 
 /** What the chrome shows of a workspace: its folder for display (`~/…`) and its panes in layout order. */
@@ -154,21 +155,80 @@ export function Sidebar({
   );
 }
 
-/** UI-UX §4.4. Copy goes to the clipboard; Discard needs the delivery queue and is wired in T2.7. */
-export function MessagesPanel({ workspace, messages }: { workspace: WorkspaceView; messages: PanelMessage[] }) {
+/** UI-UX §4.4. Copy goes to the clipboard; Discard goes to the core's queue. */
+export function MessagesPanel({
+  workspace,
+  messages,
+  onDiscard,
+}: {
+  workspace: WorkspaceView;
+  messages: PanelMessage[];
+  onDiscard: (id: string) => void;
+}) {
   return (
     <MessagesList
       title={workspace.name}
       messages={messages}
       panes={workspace.panes}
       onCopy={(text) => void navigator.clipboard.writeText(text).catch(() => {})}
-      onDiscard={() => {}}
+      onDiscard={onDiscard}
     />
   );
 }
 
-export function StatusBar({ loopCount }: { loopCount: number }) {
-  const amber = nearLimit(loopCount, LOOP_LIMIT);
+/**
+ * Loop guard ribbon, UI-UX §4.3 (MSG-04). The live region is always there so the ribbon is announced when it appears;
+ * it never takes focus by itself, ⌘J moves focus to `focusRef` (Lanjutkan).
+ */
+export function LoopRibbon({
+  guard,
+  focusRef,
+  onContinue,
+  onStop,
+  onShowLog,
+}: {
+  guard: LoopGuard;
+  focusRef?: Ref<HTMLButtonElement>;
+  onContinue: () => void;
+  onStop: () => void;
+  onShowLog: () => void;
+}) {
+  return (
+    <div aria-live="polite">
+      {guard.paused ? (
+        <div className="loop-ribbon" role="group" aria-label="Pengaman putaran">
+          <Icon name="alert" size={14} />
+          <span className="loop-ribbon-text">
+            Agen sudah saling mengirim {guard.limit} pesan tanpa masukanmu. Antrean dijeda.
+          </span>
+          <button type="button" ref={focusRef} className="btn btn-small" onClick={onContinue}>
+            Lanjutkan
+          </button>
+          <button type="button" className="btn btn-small" onClick={onStop}>
+            Hentikan dan buang antrean
+          </button>
+          <button type="button" className="btn btn-small" onClick={onShowLog}>
+            Lihat log
+          </button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/** UI-UX §4.5. MCP and "Agen membuka pane" stay static until the core reports them (T3.3). */
+export function StatusBar({
+  guard,
+  peer,
+  onPeer,
+}: {
+  guard: LoopGuard;
+  /** Null without a workspace: the switch has nothing to act on. */
+  peer: boolean | null;
+  /** Asks for the switch to become `on`. */
+  onPeer: (on: boolean) => void;
+}) {
+  const amber = nearLimit(guard.count, guard.limit);
   return (
     <footer className="statusbar">
       <button type="button" className="status-item" title="Server MCP lokal berjalan">
@@ -178,15 +238,23 @@ export function StatusBar({ loopCount }: { loopCount: number }) {
       <button type="button" className="status-item" title="Buka Settings › Kolaborasi">
         Agen membuka pane: mati
       </button>
-      <button type="button" className="status-item" title="Ubah sakelar saling kirim workspace ini">
-        Saling kirim: mati
+      <button
+        type="button"
+        className="status-item"
+        title={peer ? "Matikan saling kirim di workspace ini" : "Izinkan agen di workspace ini saling kirim"}
+        aria-pressed={peer ?? false}
+        disabled={peer === null}
+        onClick={() => onPeer(!peer)}
+      >
+        Saling kirim: {peer ? "aktif" : "mati"}
       </button>
       <button
         type="button"
         className={`status-item${amber ? " warn" : ""}`}
         title="Pesan antar agen sejak masukan terakhirmu"
+        aria-label={`Pesan antar agen ${guard.count} dari ${guard.limit}${amber ? ", mendekati batas" : ""}`}
       >
-        Pesan antar agen {loopCount}/{LOOP_LIMIT}
+        Pesan antar agen {guard.count}/{guard.limit}
       </button>
     </footer>
   );
@@ -234,8 +302,7 @@ export function EmptyState({ agents, onStart }: { agents: AgentInfo[] | null; on
 }
 
 /**
- * "Stop … in pN?" before closing a pane (UI-UX §3, SPN-04). Native modal dialog: Esc cancels, focus stays inside, and
- * Batal is focused by default so a stray Enter does not kill the process.
+ * "Stop … in pN?" before closing a pane (UI-UX §3, SPN-04).
  */
 export function CloseDialog({
   pane,
@@ -248,6 +315,61 @@ export function CloseDialog({
   onConfirm: () => void;
   onCancel: () => void;
 }) {
+  return (
+    <ConfirmDialog
+      title={`Hentikan ${pane.agent} di ${pane.id}?`}
+      text={childCount > 0 ? `${pane.id} punya ${childCount} anak yang masih hidup; anak tidak ikut ditutup.` : null}
+      confirm="Hentikan"
+      danger
+      onConfirm={onConfirm}
+      onCancel={onCancel}
+    />
+  );
+}
+
+/** Before "Saling kirim" goes on (UI-UX §4.5, MSG-06). */
+export function PeerDialog({
+  workspace,
+  limit,
+  onConfirm,
+  onCancel,
+}: {
+  workspace: string;
+  limit: number;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <ConfirmDialog
+      title={`Izinkan agen di ${workspace} saling kirim?`}
+      text={`Agen bisa mengirim prompt ke pane lain di workspace ini, bukan hanya ke induk atau anaknya. Antrean dijeda setelah ${limit} pesan tanpa masukanmu.`}
+      confirm="Nyalakan"
+      onConfirm={onConfirm}
+      onCancel={onCancel}
+    />
+  );
+}
+
+/**
+ * Native modal dialog: Esc cancels, focus stays inside, and Batal is focused by default so a stray Enter does not
+ * confirm.
+ */
+function ConfirmDialog({
+  title,
+  text,
+  confirm,
+  danger = false,
+  onConfirm,
+  onCancel,
+}: {
+  title: string;
+  text: string | null;
+  confirm: string;
+  danger?: boolean;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  const titleId = useId();
   const ref = useRef<HTMLDialogElement>(null);
   const cancel = useRef<HTMLButtonElement>(null);
   useEffect(() => {
@@ -262,26 +384,22 @@ export function CloseDialog({
       ref={ref}
       className="dialog"
       role="alertdialog"
-      aria-labelledby="close-title"
+      aria-labelledby={titleId}
       onCancel={(e) => {
         e.preventDefault();
         onCancel();
       }}
     >
-      <p id="close-title" className="dialog-title">
-        Hentikan {pane.agent} di {pane.id}?
+      <p id={titleId} className="dialog-title">
+        {title}
       </p>
-      {childCount > 0 ? (
-        <p className="dialog-text">
-          {pane.id} punya {childCount} anak yang masih hidup; anak tidak ikut ditutup.
-        </p>
-      ) : null}
+      {text ? <p className="dialog-text">{text}</p> : null}
       <div className="dialog-actions">
         <button type="button" ref={cancel} className="btn" onClick={onCancel}>
           Batal
         </button>
-        <button type="button" className="btn btn-danger" onClick={onConfirm}>
-          Hentikan
+        <button type="button" className={danger ? "btn btn-danger" : "btn btn-primary"} onClick={onConfirm}>
+          {confirm}
         </button>
       </div>
     </dialog>

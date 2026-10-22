@@ -148,6 +148,7 @@ describe("shortcut", () => {
       [key("}", "BracketRight", { shift: true }), { type: "workspaceStep", delta: 1 }],
       [key("Enter", "Enter", { shift: true }), { type: "zoom" }],
       [key("b", "KeyB"), { type: "sidebar" }],
+      [key("j", "KeyJ"), { type: "jump" }],
       [key("M", "KeyM", { shift: true }), { type: "messages" }],
       [key("=", "Equal"), { type: "font", delta: 1 }],
       [key("+", "Equal", { shift: true }), { type: "font", delta: 1 }],
@@ -165,7 +166,6 @@ describe("shortcut", () => {
     expect(key("∂", "KeyD", { meta: false, alt: true })).toBeNull();
     expect(key("d", "KeyD", { ctrl: true })).toBeNull();
     expect(key("ArrowLeft", "ArrowLeft")).toBeNull();
-    expect(key("j", "KeyJ")).toBeNull();
   });
 });
 

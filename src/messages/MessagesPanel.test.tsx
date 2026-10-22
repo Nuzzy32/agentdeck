@@ -1,10 +1,11 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { clock, MessageDetail, MessagesPanel, type MessageState, type PanelMessage, visible, waited } from "./MessagesPanel";
+import type { MessageState } from "../core/messages";
+import { clock, MessageDetail, MessagesPanel, type PanelMessage, visible, waited } from "./MessagesPanel";
 
 const msg = (id: string, state: MessageState, text = `text ${id}`): PanelMessage => ({
-  message_id: id,
-  ts: "2026-10-22T14:09:03.120Z",
+  id,
+  ts: Date.parse("2026-10-22T14:09:03.120Z"),
   from: "p2",
   to: "p1",
   state,
@@ -29,7 +30,7 @@ const panel = (messages: PanelMessage[]) =>
 describe("filter", () => {
   it("Semua keeps every message in order; Menunggu keeps queued and paused", () => {
     expect(visible(ALL, "all")).toBe(ALL);
-    expect(visible(ALL, "waiting").map((m) => m.message_id)).toEqual(["m2", "m3"]);
+    expect(visible(ALL, "waiting").map((m) => m.id)).toEqual(["m2", "m3"]);
   });
 });
 
@@ -69,7 +70,7 @@ describe("detail", () => {
 
 describe("formatting", () => {
   it("waited", () => {
-    const t = "2026-10-22T14:00:00Z";
+    const t = Date.parse("2026-10-22T14:00:00Z");
     expect(waited(t, Date.parse("2026-10-22T14:00:12Z"))).toBe("12 dtk");
     expect(waited(t, Date.parse("2026-10-22T14:03:59Z"))).toBe("3 mnt");
     expect(waited(t, Date.parse("2026-10-22T15:05:00Z"))).toBe("1 j 5 mnt");
@@ -78,7 +79,7 @@ describe("formatting", () => {
 
   it("clock is local HH:MM", () => {
     const d = new Date(2026, 9, 22, 9, 5);
-    expect(clock(d.toISOString())).toBe("09:05");
-    expect(clock("nonsense")).toBe("--:--");
+    expect(clock(d.getTime())).toBe("09:05");
+    expect(clock(Number.NaN)).toBe("--:--");
   });
 });
