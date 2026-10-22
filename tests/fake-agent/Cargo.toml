@@ -1,0 +1,9 @@
+[package]
+name = "fake-agent"
+version = "0.1.0"
+description = "Test double for Claude Code / Codex TUIs: bracketed paste, OSC 7501 status, MCP calls (T2.5)"
+edition = "2024"
+publish = false
+
+# std only: raw mode via `stty`, HTTP/1.0 over `TcpStream`, a constant base64 `msg`. No dependencies.
+[dependencies]
