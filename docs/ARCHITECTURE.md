@@ -68,6 +68,12 @@ throughput", channel "designed to be fast and deliver ordered data"). Input, res
    `$SHELL -l -c 'printf %s "$PATH"'`. Pane shell menjalankan `$SHELL -l`.
 3. **Alirkan.** Thread baca meneruskan setiap potongan output ke: `Screen` (vt100), pemindai OSC (`status`), dan
    `Channel` ke WebView. Bila WebView belum terpasang, 1 MB terakhir disimpan untuk diputar ulang.
+   **Flow control (D-018):** thread baca berhenti membaca bila byte yang terkirim tetapi belum dikonfirmasi xterm.js
+   melebihi jendela kredit (bawaan 256 KB); buffer kernel PTY lalu menahan program penghasil output. WebView
+   mengirim `pane_ack {total}` berisi total kumulatif dari callback `term.write`, digabung paling banyak satu per
+   putaran event loop lewat microtask (bukan `setTimeout`, yang ditahan WebKit saat jendela tersembunyi). Total
+   kumulatif membuat ack yang hilang tertutup oleh ack berikutnya. Perintah `pane_write`/`pane_ack` `async` agar
+   tidak berjalan di main thread. Tanpa ini xterm.js membuang data ("write data discarded").
 4. **Selesai.** Saat proses keluar: status `exited`, token pane dicabut, pesan yang tertahan ditandai `dropped`, UI
    menawarkan "Jalankan ulang" atau "Buka shell di sini".
 5. **Tutup.** Hanya orang. `SIGTERM` ke grup proses, `SIGKILL` setelah 3 detik. Saat aplikasi keluar, semua pane
@@ -254,7 +260,7 @@ Langkah dan perintah lengkap: `docs/PHASE-0.md`. Setiap spike punya kriteria lul
 | S3 | Injeksi MCP Codex | Tool agentdeck terdaftar dan bisa dipanggil tanpa prompt; tidak ada entri `agentdeck` di `~/.codex/config.toml` sesudahnya. **Lulus (D-017).** |
 | S4 | Status Claude | OSC 7501 terlihat untuk working/idle/needs_you setelah query dijawab. **Lulus (D-016).** |
 | S5 | Status Codex | OSC 7501 `blocked` saat minta izin dan `idle` saat turn selesai; cadangan OSC 9. **Lulus (D-017).** |
-| S6 | Throughput | 50 MB output (`cat` berkas besar) lewat Channel tanpa UI beku; ketikan tetap < 50 ms. |
+| S6 | Throughput | 50 MB output (`cat` berkas besar) lewat Channel tanpa UI beku; ketikan tetap < 50 ms. **Lulus dengan flow control (D-018).** |
 | S7 | Layar headless | `vt100` membaca layar Claude Code dan Codex dengan benar dan `bracketed_paste()` bernilai benar setelah TUI siap. **Lulus (D-013).** |
 | S8 | Server MCP | `rmcp` 3.x + axum: middleware token, token → pane di handler, `instructions` terlihat oleh kedua agen, negosiasi versi protokol dengan kedua klien. **Lulus (D-017).** |
 

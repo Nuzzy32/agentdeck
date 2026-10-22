@@ -5,7 +5,7 @@ atau PR). Kolom **Butuh** menyebut task yang harus selesai lebih dulu; task tanp
 dikerjakan paralel (ditandai ∥). Setiap task selesai bila kriteria **Selesai bila** terpenuhi dan workflow di
 `AGENTS.md` dijalankan.
 
-Status per 2026-10-21: T0.1–T0.5 selesai (S1–S5, S7, S8 lulus); T1.1 selesai; berikutnya T0.6 (S6); T0.7 sebagian. Perbarui baris ini saat task selesai.
+Status per 2026-10-22: Phase 0 selesai (S1–S8 lulus; T0.7 sebagian); T1.1 selesai; berikutnya T0.7 lalu T1.2. Perbarui baris ini saat task selesai.
 
 ## Phase 0 — Spike kelayakan
 Panduan lengkap: `docs/PHASE-0.md`. Tidak ada kode produk.
@@ -27,8 +27,8 @@ Tujuan akhir: alur A (PRD §7) tanpa MCP.
 |---|---|---|---|---|
 | T1.1 | Kerangka Tauri + konfigurasi jendela dan CSP (SETUP §2, §5), skrip `typecheck`/`test` | `package.json`, `src-tauri/tauri.conf.json` | T0.1 | `pnpm tauri dev` membuka jendela "agentdeck"; clippy, tes, typecheck lulus |
 | T1.2 ∥ | Token desain + kerangka layout statis: title bar, sidebar, status bar, keadaan awal | `src/styles/tokens.css`, `src/App.tsx`, `src/layout/` | T1.1 | Cocok dengan UI-UX §2, §4.7, §6 di tema gelap dan terang |
-| T1.3 ∥ | `PaneManager`: buat pane shell, tulis, resize, hentikan grup proses; thread baca → `Channel`; buffer putar ulang 1 MB | `src-tauri/src/pty.rs`, `lib.rs` | T1.1 | Tes integrasi: `echo` muncul di stream; `pane_close` menghentikan anak dan cucu |
-| T1.4 | `TerminalPane`: xterm.js + fit + webgl (cadangan bila konteks WebGL hilang), Channel → `write`, `onData` → `pane_write`, resize | `src/pane/TerminalPane.tsx` | T1.3 | Shell interaktif berjalan; `vim` dan `htop` tampil benar; resize mengikuti |
+| T1.3 ∥ | `PaneManager`: buat pane shell, tulis, resize, hentikan grup proses; thread baca → `Channel` dengan flow control jendela kredit + `pane_ack` kumulatif (D-018); buffer putar ulang 1 MB | `src-tauri/src/pty.rs`, `lib.rs` | T1.1 | Tes integrasi: `echo` muncul di stream; `pane_close` menghentikan anak dan cucu; tes unit: pembaca berhenti di batas jendela kredit dan lanjut setelah ack, ack lama (total lebih kecil) diabaikan |
+| T1.4 | `TerminalPane`: xterm.js + fit + webgl (cadangan bila konteks WebGL hilang), Channel → `write` + `pane_ack` kumulatif lewat microtask (D-018), `onData` → `pane_write`, resize | `src/pane/TerminalPane.tsx` | T1.3 | Shell interaktif berjalan; `vim` dan `htop` tampil benar; resize mengikuti |
 | T1.5 | Pohon split + workspace (sidebar), fokus, pintasan UI-UX §7 (tanpa `⌘J`), dialog tutup | `src/layout/` | T1.4 | Semua pintasan bekerja; split ditolak di bawah 40×8 |
 | T1.6 ∥ | `PATH` dari shell login, `catalogue.toml` (claude-code, codex), deteksi + versi, perintah `agents_list` | `catalogue.rs`, `catalogue.toml` | T1.3 | Tes unit parsing katalog; deteksi benar di mesin pemilik |
 | T1.7 | Peluncur (UI-UX §4.1), luncurkan agen manual tanpa MCP, header pane dengan status heuristik, pita "selesai" | `src/launcher/`, `launch.rs`, `status.rs` | T1.5, T1.6 | Alur A berjalan; agen tidak terpasang tampil sesuai UI-UX §5 |

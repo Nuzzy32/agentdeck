@@ -165,8 +165,11 @@ Butuh proyek Tauri dari `docs/SETUP.md` §2. Spike di branch `spike/s6`, dibuang
 - `invoke("pty_write")` untuk ketikan, `invoke("pty_resize")` untuk ukuran.
 
 Uji: `yes | head -c 50000000`, lalu `cat` berkas log 50 MB, sambil mengetik di pane kedua.
+Sumber spike tersimpan di `spikes/s6-throughput/` (`lib.rs`, `App.tsx`; salin ke kerangka Tauri untuk menjalankan).
+Jendela harus terlihat selama pengukuran: WebKit menahan timer dan rendering di jendela tersembunyi.
+
 **Lulus:** UI tidak beku lebih dari 1 detik, ketikan di pane lain tetap < 50 ms (ukur dengan Performance panel Web
-Inspector), memori stabil setelah selesai.
+Inspector), memori stabil setelah selesai. Hasil: lulus dengan flow control (D-018).
 
 ## Mencatat hasil
 Satu entri per spike di `docs/DECISIONS.md`:

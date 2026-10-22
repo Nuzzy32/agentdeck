@@ -162,3 +162,29 @@ Versi: Claude Code 2.1.303, Codex 0.163.0, `rmcp` 3.6.0, `axum` 0.8.9. Sumber: `
   "catat hasil spike ini di PHASE-0.md"); `vt100` membacanya sebagai teks biasa. `pane_read` tidak boleh
   menganggapnya ketikan orang.
 Bukti: `spikes/out/s2-*`, `s3-*`, `s5-*` (tidak di-commit), log server di `/tmp/agentdeck-s8/err.log`.
+
+## D-018 — Phase 0 S6: throughput PTY → Channel → xterm.js butuh flow control (2026-10-22)
+Versi: Tauri 2.12.4, `portable-pty` 0.9.0, `@xterm/xterm` 6.0.0 + `@xterm/addon-webgl` 0.19.0, WKWebView macOS.
+Sumber: `spikes/s6-throughput/` (dua pane xterm.js; pane A dibanjiri, pane B menjalankan `cat` dan setiap 100 ms satu
+karakter dikirim lalu diukur waktu kembalinya; jeda antar-frame lewat `requestAnimationFrame`).
+- **Tanpa flow control: gagal.** xterm.js membuang data saat buffer tulisnya penuh (71 077 kali "write data discarded,
+  use flow control to avoid losing data" untuk 50 MB `yes`).
+- **Keputusan:** jendela kredit di Rust. Thread baca berhenti bila `sent - acked > WINDOW`; WebView mengirim total
+  kumulatif dari callback `term.write`, digabung lewat microtask; perintah ack/tulis `async`. Ack per-chunk (selisih)
+  ditolak: satu ack yang gagal di bawah beban (terlihat, galat `null`) mengecilkan jendela permanen sampai macet.
+  `setTimeout` ditolak untuk penjadwalan ack: WebKit menahan timer ke ±1 Hz saat jendela tersembunyi, sehingga PTY
+  ikut melambat.
+- **Hasil dengan jendela 1 MB** (jendela terlihat): 50 MB `yes` (75 MB byte terminal karena `\n`→`\r\n`) tuntas
+  17,6 s, 0 dibuang, jeda frame maks 42 ms, RTT ketikan p95 2 ms / maks 37 ms. Berkas berwarna 50 MB: 6,0 s
+  (8,4 MB/s), 0 dibuang, jeda frame maks 65 ms, lag event loop maks 39 ms, tetapi RTT ketikan p50 110 / p95 255 ms
+  (gema pane B antre di belakang hingga 1 MB data pane A).
+- **Hasil dengan jendela 256 KB** (bawaan yang dipilih): berkas berwarna 6,2 s (8,1 MB/s, throughput sama), RTT
+  ketikan p50 17 / p95 49 / maks 72 ms, 0 dibuang; `yes` 18 s, RTT p95 8 ms. Catatan jujur: kedua run 256 KB berakhir
+  dengan jendela `hidden` (pemilik sedang memakai Mac), jadi lag event loop maks ±985 ms di run itu adalah efek
+  penahanan timer, bukan beku. Ukur ulang di aplikasi nyata (T1.4) dengan jendela terlihat.
+- Memori proses ±110 MB RSS setelah 50 MB.
+- Kriteria S6 (UI tidak beku > 1 s, ketikan < 50 ms p95): **lulus dengan flow control dan jendela 256 KB**.
+Dampak ke desain: ARCHITECTURE §3 (flow control), T1.3/T1.4. Jendela kredit dijadikan konstanta yang bisa disetel
+(bukan pengaturan pengguna). Spike menjalankan jendela `always_on_top` hanya untuk pengukuran; produk tidak.
+Temuan sampingan: React StrictMode menjalankan `useEffect` dua kali di dev; pembuatan PTY di `TerminalPane` harus
+idempoten (id pane dari core, bukan dari efek).
