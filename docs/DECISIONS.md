@@ -259,3 +259,29 @@ dibanjiri output berwarna (throughput tidak berubah). Tes kredit di `pty.rs` kin
 Diuji 2026-10-22 dengan Claude Code 2.1.306 dan Codex 0.163.0 di `pnpm tauri dev`: Claude `idle` setelah query
 dijawab; dengan tugas awal `idle → working → blocked:kind=auth` ("perlu login", login pemilik kedaluwarsa); Codex
 `idle`. Bagian `mcpServers` di `~/.claude.json` dan shasum `~/.codex/config.toml` sama sebelum/sesudah.
+
+## D-022 — T3.1: kartu persetujuan spawn, notifikasi macOS (2026-10-22)
+- **`tauri-plugin-notification` (2.7.0)** untuk notifikasi "<Agen> (pN) ingin membuka <agen>" saat jendela tidak fokus
+  (UI-UX §4.2). Plugin resmi Tauri; alternatifnya memanggil `UNUserNotificationCenter` sendiri lewat Objective-C.
+  Dikirim dari Rust saja (`approval_notify` di `lib.rs`), jadi capability `default` tidak diberi izin
+  `notification:*` dan paket JS-nya tidak dipasang. Di macOS yang dikompilasi hanya `notify-rust` +
+  `mac-notification-sys`; crate zbus/winrt di `Cargo.lock` hanya untuk Linux/Windows. Klik notifikasi mengaktifkan
+  aplikasi (perilaku bawaan macOS), yang membawa jendela dan kartunya ke depan; plugin tidak memberi callback klik di
+  desktop. Di `pnpm tauri dev` (tanpa bundle) macOS bisa menampilkannya atas nama aplikasi lain atau tidak sama sekali;
+  diperiksa ulang di build bundel.
+- **`approvals.rs`:** `Approvals::request(req, timeout, alive)` → `Approved | Denied | Timeout`. Batas waktu dari
+  pemanggil (T3.2: Settings, 30–300 s). `alive` dicek tiap 250 ms; untuk `pane_spawn` cukup `resolve(token).is_some()`,
+  karena token dicabut saat pane keluar atau ditutup (panes.rs tidak perlu kait baru). Future yang dibuang (panggilan
+  MCP dibatalkan) menutup kartunya sebagai `denied`. Jawaban untuk kartu yang sudah tutup diabaikan
+  (`approval_answer` → `false`).
+- **Kontrak UI:** event `agentdeck://approval` `{ id, pane, requester_agent, agent, title, cwd, task, created_at,
+  expires_at }` (ms epoch; `created_at` ditambahkan supaya bar hitung mundur benar setelah WebView dimuat ulang),
+  `agentdeck://approval-closed` `{ id, outcome: "approved"|"denied"|"timeout" }`, perintah
+  `approval_answer { id, allow } -> bool` dan `approvals_pending -> Approval[]`. `requester_agent`/`agent` adalah nama
+  tampilan. Perintah `approval_demo { pane, secs? }` hanya ada di build debug.
+- **⌘J** berputar: kartu tertunda tertua → kartu berikutnya → pita pengaman putaran → kembali. Kartu di workspace lain
+  atau di bawah pane yang diperbesar: workspace-nya diaktifkan dan zoom dilepas dulu. Kartu sendiri tidak pernah
+  memanggil `focus()`.
+Diuji 2026-10-22 di `pnpm tauri dev` dengan harness sementara (33/33): kartu tidak mencuri fokus dari terminal,
+hitung mundur, tugas 12 baris bergulir (maks 8), ⌘J, ⌘Enter, Esc, klik Izinkan, Kedaluwarsa 3 s, pane peminta
+ditutup/keluar → `denied`.

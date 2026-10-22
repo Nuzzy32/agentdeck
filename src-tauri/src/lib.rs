@@ -1,3 +1,4 @@
+pub mod approvals;
 pub mod catalogue;
 pub mod delivery;
 pub mod launch;
@@ -117,10 +118,119 @@ struct WorkspaceChanged {
     workspace: String,
 }
 
+/// The person's answer to a spawn card; false when it was no longer pending (answered, timed out, or gone).
+#[tauri::command]
+async fn approval_answer(
+    approvals: tauri::State<'_, approvals::Approvals>,
+    id: String,
+    allow: bool,
+) -> Result<bool, String> {
+    Ok(approvals.answer(&id, allow))
+}
+
+/// Pending spawn cards, oldest first, for a WebView that (re)loads.
+#[tauri::command]
+async fn approvals_pending(
+    approvals: tauri::State<'_, approvals::Approvals>,
+) -> Result<Vec<approvals::Approval>, String> {
+    Ok(approvals.pending())
+}
+
+/// Debug builds only: one sample card above `pane`, to try the cards before `pane_spawn` (T3.2) exists. It closes
+/// like a real request, including when the pane closes or exits. `secs` defaults to 120.
+#[cfg(debug_assertions)]
+#[tauri::command]
+async fn approval_demo(
+    approvals: tauri::State<'_, approvals::Approvals>,
+    panes: tauri::State<'_, panes::Panes>,
+    pane: String,
+    secs: Option<u64>,
+) -> Result<(), String> {
+    let timeout = std::time::Duration::from_secs(secs.unwrap_or(120));
+    let running = {
+        let panes = panes.inner().clone();
+        let pane = pane.clone();
+        move || {
+            panes::lock(&panes)
+                .list(&pane)
+                .is_some_and(|l| l.panes.iter().any(|p| p.id == pane && p.status != "exited"))
+        }
+    };
+    let requester = panes::lock(&panes)
+        .list(&pane)
+        .and_then(|l| l.panes.into_iter().find(|p| p.id == pane))
+        .ok_or_else(|| format!("pane {pane} tidak ada"))?
+        .agent
+        .unwrap_or_else(|| "Shell".into());
+    let req = approvals::Request {
+        pane,
+        requester_agent: requester,
+        agent: "Codex".into(),
+        title: "review: auth".into(),
+        cwd: std::env::var("HOME").unwrap_or_default(),
+        task: (1..=12)
+            .map(|i| {
+                format!("{i}. Review the diff on branch feat/auth for bugs. Do not edit files.")
+            })
+            .collect::<Vec<_>>()
+            .join("\n"),
+    };
+    let approvals = approvals.inner().clone();
+    tauri::async_runtime::spawn(async move {
+        let outcome = approvals.request(req, timeout, running).await;
+        eprintln!("agentdeck: approval_demo -> {outcome:?}");
+    });
+    Ok(())
+}
+
+/// Card events to the WebView, plus a macOS notification when the window is not focused (UI-UX §4.2). Clicking a
+/// notification activates the app, which brings its window and the card to the front.
+fn approval_notify(handle: tauri::AppHandle) -> approvals::Notify {
+    use tauri::{Emitter, Manager};
+    use tauri_plugin_notification::NotificationExt;
+    std::sync::Arc::new(move |n| match n {
+        approvals::Notice::Opened(a) => {
+            let focused = handle
+                .get_webview_window("main")
+                .and_then(|w| w.is_focused().ok())
+                .unwrap_or(false);
+            if !focused {
+                let body = format!(
+                    "{} ({}) ingin membuka {}",
+                    a.requester_agent, a.pane, a.agent
+                );
+                if let Err(e) = handle
+                    .notification()
+                    .builder()
+                    .title("agentdeck")
+                    .body(body)
+                    .show()
+                {
+                    eprintln!("agentdeck: notification not shown: {e}");
+                }
+            }
+            let _ = handle.emit("agentdeck://approval", a);
+        }
+        approvals::Notice::Closed { id, outcome } => {
+            let _ = handle.emit(
+                "agentdeck://approval-closed",
+                ApprovalClosed { id, outcome },
+            );
+        }
+    })
+}
+
+#[derive(Clone, serde::Serialize)]
+struct ApprovalClosed {
+    id: String,
+    outcome: approvals::Outcome,
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() -> tauri::Result<()> {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_notification::init())
         .setup(|app| {
             use tauri::{Emitter, Manager};
             // The login-shell PATH probe takes up to seconds; start it now so the first pane does not wait for it.
@@ -168,6 +278,9 @@ pub fn run() -> tauri::Result<()> {
             app.manage(pm);
             app.manage(engine);
             app.manage(status);
+            app.manage(approvals::Approvals::new(approval_notify(
+                app.handle().clone(),
+            )));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -188,6 +301,10 @@ pub fn run() -> tauri::Result<()> {
             loop_guard_stop,
             workspace_set_peer,
             workspace_get_peer,
+            approval_answer,
+            approvals_pending,
+            #[cfg(debug_assertions)]
+            approval_demo,
         ])
         .build(tauri::generate_context!())?
         .run(|app, event| {
