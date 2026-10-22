@@ -306,3 +306,51 @@ ditutup/keluar → `denied`.
   nama variabel saat katalog dimuat karena disisipkan ke skrip shell. Diperiksa ulang setiap `agents_info`.
 - `Catalogue::builtin()` kini mengembalikan katalog yang berlaku (bawaan + pengguna + path manual) karena dipakai
   `panes.rs`; katalog murni lewat `Catalogue::embedded()`.
+
+## D-024 — T3.2/T3.4/T4.1/T3.5: `pane_spawn`, audit, worktree, alur B dengan CLI asli (2026-10-23)
+- **Urutan pemeriksaan** (`spawn.rs`): argumen (`BAD_ARGS`: field asing, `title` 1–60 karakter tanpa karakter kontrol,
+  `task` 1–16384 byte tanpa NUL) → sakelar/`NESTED`/batas (`policy::check_spawn`) → agen di katalog (`UNKNOWN_AGENT`
+  menyebut id yang ada) dan terpasang di `PATH` env anak (`AGENT_NOT_INSTALLED`) → `cwd` absolut tanpa `..`,
+  dikanonikalisasi (symlink diikuti) dan harus di dalam folder pemanggil yang juga dikanonikalisasi (`CWD_OUTSIDE`;
+  tidak ada/bukan folder = `BAD_ARGS`) → `worktree: true` butuh repo git (`BAD_ARGS`) → kartu. Agen tidak pernah
+  ditanya orang untuk sesuatu yang pasti gagal.
+- **Batas:** rate 5 per 10 menit dihitung **per aplikasi** dan baru terpakai saat kartu ditampilkan (ditolak dan habis
+  waktu tetap terhitung, mencegah banjir kartu). Kartu yang masih menunggu dan anak yang sedang diluncurkan dihitung
+  sebagai anak hidup untuk `CAP_CHILDREN`/`CAP_GLOBAL`, jadi kartu bertumpuk tidak bisa melampaui batas. Pemeriksaan
+  diulang saat slot diambil.
+- **Kode galat baru `SPAWN_FAILED`** (MCP-TOOLS): kartu disetujui tetapi peluncuran atau pembuatan worktree gagal.
+  Worktree yang terlanjur dibuat dihapus lagi; audit `spawn_denied` alasan `launch failed`.
+- **Peluncuran anak** lewat `panes::start` yang sama dengan pane buatan orang (tanpa shell, env dari nol, injeksi MCP,
+  tugas setelah `--`), `parent` = pemanggil, workspace pemanggil, PTY 24×80 sampai UI memasangnya. Fungsi kembali
+  setelah proses berjalan: `{pane, cwd, status: "starting"}` (+ `branch` bila worktree).
+- **UI:** event baru `agentdeck://pane-spawned` (`Spawned`: pane, pty, workspace, parent, agent, agent_name, title,
+  cwd, branch), `agentdeck://pane-event` `{pane, event}` (status/keluar anak; selalu sesudah `pane-spawned`, event
+  proses lama yang sudah diganti tidak diteruskan), `agentdeck://spawn-refused` `{pane, code, limit}` untuk toast
+  (SPAWN_OFF, CAP_*, RATE). Anak ditaruh di samping induk: split kanan bila muat 40×8, selain itu bawah. `pane_close`
+  kini mengembalikan `KeptWorktree | null` (sebelumnya `null`), jadi kontrak lama tetap berlaku.
+- **Worktree (T4.1):** `<akar repo utama>/.worktrees/<id>` di branch `agent/<id>` dari `HEAD` pemanggil; `<id>` = id
+  pane anak, diberi akhiran `-2`, `-3` bila sudah ada (id pane mulai lagi dari p1 setiap kali aplikasi dibuka, worktree
+  yang dibiarkan bertahan). `/.worktrees/` ditambahkan ke `.git/info/exclude` (lokal, tidak di-commit) agar repo induk
+  tidak melihatnya. `git worktree add` jalan dengan `core.hooksPath=/dev/null` (permintaan agen tidak menjalankan hook
+  repo) dan tanpa variabel `GIT_*` agentdeck. Saat orang menutup anak: berubah = ada berkas berubah/baru di
+  `git status --porcelain` **atau** commit baru di branch sejak dibuat → dibiarkan + toast; selain itu
+  `git worktree remove` (tanpa `--force`) dan `git branch -D`. Worktree anak yang masih terbuka saat aplikasi keluar
+  tidak dibersihkan (batasan).
+- **Audit (T3.4):** `spawn_requested` (kartu tampil, termasuk `worktree`), `spawn_approved` (`pane`), `spawn_denied`
+  (`denied` | `timeout` | `launch failed`), `spawn_refused` (`code`, sebelum kartu), `loop_paused`, `pane_closed`
+  (setiap pane yang ditutup orang). Tanpa token (`Store` juga menyaring deret 64-hex).
+- **Batas waktu tool Claude Code:** uji asli pertama gagal: Claude Code 2.1.308 memutus `pane_spawn` tepat 60 s
+  ("The operation timed out."), kartu tetap terbuka, dan persetujuan sesudahnya membuka Codex yang tidak diketahui
+  Claude. Perbaikan: `"timeout":330000` di entri server `--mcp-config` (field per server Claude Code, per peluncuran,
+  tidak menyentuh config global). Uji ulang: kartu disetujui setelah ~95 s, panggilan selesai di 107 s dan Claude
+  melanjutkan. Codex `tool_timeout_sec=330` tidak bisa dibuktikan karena server OpenAI "at capacity".
+- **Alur B dengan CLI asli (2026-10-23, Claude Code 2.1.308, Codex 0.163.0, `pnpm tauri dev`):** Claude di repo uji
+  sementara menulis `clamp` + tes lalu memanggil `pane_spawn` codex; kartu tampil tanpa mencuri fokus; ⌘J ⌘Enter
+  setelah 90 s → pane Codex terbuka di samping dengan lencana "anak p1" dan baris anak di sidebar. Codex menjawab
+  "Selected model is at capacity" (model bawaan dan `-m gpt-5.6-luna` lewat path manual khusus uji), jadi Codex tidak
+  meninjau. Sebagai gantinya Claude membuka Claude Code sebagai anak (p3): p3 meninjau, memanggil `pane_report`, p1
+  menerima `RESULT status=done files=calc.py,test_calc.py tests=pass` sebagai satu tempelan, memeriksa sendiri, dan
+  panel Pesan menampilkan `p3 → p1 terkirim`. Juga lulus dengan CLI asli: Esc di kartu → `DENIED` dan Claude meninjau
+  sendiri; kartu tidak dijawab → `APPROVAL_TIMEOUT`; sakelar mati → `SPAWN_OFF` + toast; kartu ke-6 dalam 10 menit →
+  `RATE`; dua anak `worktree: true` → `.worktrees/p4|p5`, tutup yang bersih menghapus worktree + branch, yang berubah
+  dibiarkan + toast. Ulangi bagian Codex saat server OpenAI lega.

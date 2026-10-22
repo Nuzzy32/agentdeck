@@ -5,7 +5,7 @@ atau PR). Kolom **Butuh** menyebut task yang harus selesai lebih dulu; task tanp
 dikerjakan paralel (ditandai ∥). Setiap task selesai bila kriteria **Selesai bila** terpenuhi dan workflow di
 `AGENTS.md` dijalankan.
 
-Status per 2026-10-23: Phase 0–2 selesai (alur C lulus uji manual pemilik; alur D belum diuji). Phase 3: T3.1 (kartu persetujuan + notifikasi) dan T3.3 (Settings) selesai; berikutnya T3.2 `pane_spawn`, T3.4 audit, T3.5 alur B. Phase 4: T4.2 `pane_report` (core), T4.4/T4.5 (core: katalog pengguna, path manual, info login), T4.6 (pesan tertahan), T4.7 (tema/font terminal) selesai; sisa T4.1 worktree, T4.3 pulihkan tata letak, header laporan anak (UI T4.2). Perbarui baris ini saat task selesai.
+Status per 2026-10-23: Phase 0–2 selesai (alur C lulus uji manual pemilik; alur D belum diuji). Phase 3: T3.1 (kartu persetujuan + notifikasi), T3.2 `pane_spawn`, T3.3 (Settings), T3.4 audit selesai; T3.5 alur B lulus dengan Claude Code asli sebagai peninjau, bagian Codex tertahan "model at capacity" di server OpenAI (D-024; ulangi). Phase 4: T4.1 worktree, T4.2 `pane_report` (core), T4.4/T4.5 (core: katalog pengguna, path manual, info login), T4.6 (pesan tertahan), T4.7 (tema/font terminal) selesai; sisa T4.3 pulihkan tata letak, header laporan anak (UI T4.2). Perbarui baris ini saat task selesai.
 
 ## Phase 0 — Spike kelayakan
 Panduan lengkap: `docs/PHASE-0.md`. Tidak ada kode produk.

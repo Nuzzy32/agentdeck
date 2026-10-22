@@ -109,7 +109,7 @@ Nama variabel sengaja bukan `ANTHROPIC_*`: Claude Code mengosongkan `ANTHROPIC_A
 ### Claude Code
 ```
 claude --mcp-config '{"mcpServers":{"agentdeck":{"type":"http","url":"${AGENTDECK_MCP_URL}",
-                      "headers":{"Authorization":"Bearer ${AGENTDECK_TOKEN}"}}}}' \
+                      "headers":{"Authorization":"Bearer ${AGENTDECK_TOKEN}"},"timeout":330000}}}' \
        --allowedTools mcp__agentdeck \
        -- "<tugas awal>"
 ```
@@ -119,6 +119,9 @@ claude --mcp-config '{"mcpServers":{"agentdeck":{"type":"http","url":"${AGENTDEC
   masuk utuh sebagai prompt (terbukti 2026-10-22, D-019).
 - `--mcp-config` menambah server **hanya untuk sesi ini**. `--strict-mcp-config` sengaja **tidak** dipakai agar server
   MCP milik pengguna tetap termuat.
+- `"timeout":330000`: batas waktu per panggilan tool untuk server ini. Tanpa itu Claude Code 2.1.308 memutus
+  `pane_spawn` setelah 60 detik ("The operation timed out.") sementara kartu masih menunggu. Dengan itu kartu yang
+  dijawab setelah 95 detik selesai normal (T3.5, D-024).
 - `--allowedTools mcp__agentdeck` mengizinkan semua tool agentdeck tanpa prompt, karena gerbangnya ada di agentdeck
   (D-008). Izin lain (edit berkas, Bash) tetap ditanyakan Claude seperti biasa; tidak ada `--permission-mode`.
 - Terbukti di S2 (D-017): bentuk di atas (pembungkus `mcpServers`, `${VAR}` dari env anak) tersambung, `whoami`
@@ -137,7 +140,8 @@ codex -c 'mcp_servers.agentdeck.url="http://127.0.0.1:<port>/mcp"' \
 - `default_tools_approval_mode = "approve"` berarti tool agentdeck tidak ditanyakan (D-008, terbukti S3). Anotasi tool
   tetap dipasang, tetapi perilaku mode `auto` tanpa `approve` tidak diuji dan tidak diandalkan.
 - `tool_timeout_sec` bawaan Codex 60 detik (config-reference), lebih pendek dari kartu persetujuan `pane_spawn`
-  (sampai 300 detik), jadi dinaikkan ke 330. **[T3.2]** buktikan dengan kartu yang dijawab setelah 90 detik.
+  (sampai 300 detik), jadi dinaikkan ke 330. Belum terbukti dengan CLI asli: server OpenAI "at capacity" selama
+  uji T3.5 (D-024).
 - Status Codex datang dari OSC 7501 tanpa konfigurasi (S5, D-016/D-017); `tui.notification*` tidak dipakai.
 - `CODEX_HOME` tidak diubah (berisi `auth.json`, login pengguna). Flag `-a`/`-s` tidak dipakai: sandbox dan approval
   mengikuti setelan pengguna.
@@ -262,7 +266,8 @@ dari token di kedua mode (D-017). `allowed_origins` rmcp kosong secara bawaan be
 - `layout.json` (P1): workspace dan split.
 - `logs/messages-YYYY-MM-DD.jsonl`: `ts`, `workspace`, `from`, `to`, `message_id`, `state`, `reason`, `text`.
   Disimpan 14 hari.
-- `logs/audit-YYYY-MM-DD.jsonl`: spawn diminta/disetujui/ditolak, jeda pengaman putaran, pane ditutup.
+- `logs/audit-YYYY-MM-DD.jsonl`: `spawn_requested`, `spawn_approved`, `spawn_denied` (`denied`/`timeout`/`launch
+  failed`), `spawn_refused` (kode, sebelum kartu), `loop_paused`, `pane_closed` (D-024).
 
 Tidak ada token di mana pun. SQLite ditunda sampai ada kebutuhan pencarian (D-010).
 
@@ -313,7 +318,8 @@ dianggap selesai.
 | Kotak input kosong bisa dideteksi dari `vt100`; teks lama atau saran samar Claude tidak ikut terkirim (§5.2). **T2.7, terbukti sebagian (2026-10-22):** pada Claude Code 2.1.308 dan Codex 0.163.0 asli (lewat `panes::start`), `input_state` = kosong saat idle, sehingga pesan langsung `delivered`; saran samar Claude ("Try …") tidak dianggap teks. Teks yang diketik orang lalu dibiarkan di kotak input belum diuji di CLI asli (hanya fake-agent: pesan menunggu sampai input kosong dan `typing_ms` lewat). | T2.7 |
 | Claude mengerjakan permintaan dari pesan agen yang seluruhnya tempelan (§5.3). **T2.7, belum terbukti:** uji Codex → Claude (`src-tauri/tests/real_cli.rs`) gagal di sisi Codex: "Selected model is at capacity" (model bawaan dan `-m gpt-5.6-luna`), jadi permintaan tidak pernah dikirim. Tempelan 8 KB langsung dari core ke Claude memulai giliran kerja (status `working`), tetapi jawabannya tidak ditunggu. Ulangi dengan `cargo test --test real_cli -- --ignored --nocapture` saat server Codex lega. **Uji manual pemilik 2026-10-22 (Claude Code 2.1.308, Codex 0.163.0, di aplikasi):** alur Claude → Codex → Claude berhasil: tempelan dari p1 diterima Codex sebagai satu prompt, Codex **mengerjakan permintaan di dalamnya** (memanggil `pane_send` membalas "halo" ke p1), balasan diterima Claude yang mengenalinya sebagai pesan agen dan memilih tidak membalas lagi (menghindari putaran). Terbukti untuk Codex; untuk Claude terbukti pesan agen dibaca dan ditindaklanjuti sesuai `instructions`, tetapi permintaan kerja (mis. "perbaiki temuan ini") dari Codex ke Claude belum diuji. | T2.7 |
 | Tempelan maksimum (8192 + penanda) terkirim utuh. **T2.7, terbukti sebagian:** Codex 0.163.0 menampilkan satu tempelan `[Pasted Content 8286 chars]` (8192 + penanda 93 + `\n`); Claude 2.1.308 menampilkan `[Pasted text #1 +215 lines]` dan baris terakhir pesan terlihat di layarnya, lalu mulai bekerja. Jawaban yang mengutip baris terakhir belum ditunggu (lihat baris di atas). | T2.7 |
-| `tool_timeout_sec=330` membuat Codex menunggu kartu persetujuan; batas waktu tool MCP di Claude cukup panjang. | T3.2 |
+| `tool_timeout_sec=330` membuat Codex menunggu kartu persetujuan; batas waktu tool MCP di Claude cukup panjang. **T3.5 (2026-10-23):** klaim Claude **salah**: Claude Code 2.1.308 memutus panggilan di 60 s. Diperbaiki dengan `"timeout":330000` di `--mcp-config`; kartu yang disetujui setelah ~95 s kini selesai (panggilan 107 s) dan Claude melanjutkan. Codex belum terbukti: model bawaan dan `gpt-5.6-luna` "at capacity" (D-024). | T3.2, T3.5 |
+| Worktree anak yang masih terbuka saat aplikasi keluar dibersihkan. **Tidak:** hanya penutupan pane oleh orang yang menghapus worktree tanpa perubahan; yang tersisa setelah aplikasi keluar (atau crash) tetap ada di `.worktrees/` bersama branch-nya (T4.1, D-024). | T4.3 |
 | Pane di workspace tidak aktif, jendela tersembunyi, atau diminimalkan tetap mengalir dan statusnya tetap terbaca (D-018 hanya mengukur jendela terlihat). | T1.4 |
 | ~~`pane_read` pada alternate screen: `vt100` tidak punya scrollback di sana; `lines` dibatasi tinggi layar bila alternate screen aktif.~~ **Terbukti T2.4:** `Screen::read` mengembalikan paling banyak setinggi layar di alternate screen (tes `screen.rs`), `pane_read` memakainya; deskripsi tool menyebut batas ini. | T2.4 |
 | Saran samar Claude bisa dibedakan dari teks biasa lewat atribut `vt100`; bila tidak, dicatat sebagai batasan `pane_read`. **T2.4:** dibedakan untuk deteksi input (atribut dim, terbukti di layar Claude 2.1.308 asli). **Batasan:** `pane_read` mengembalikan teks polos tanpa atribut, jadi saran samar ("Try …") ikut terbaca seperti teks biasa. | T2.4 |

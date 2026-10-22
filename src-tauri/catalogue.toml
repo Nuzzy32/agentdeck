@@ -7,6 +7,8 @@
 # - mcp_args:  argv injeksi MCP. `{mcp_url}` diganti URL server lokal. Token tidak pernah masuk argv: agen membacanya
 #              dari env AGENTDECK_TOKEN (Claude mengekspansi `${VAR}` sendiri).
 #              Opsional untuk agen pengguna: tanpa mcp_args agen jalan tanpa injeksi.
+#              Batas waktu tool 330 s di kedua agen: `pane_spawn` menunggu kartu persetujuan sampai 300 s. Tanpa itu
+#              Claude Code memutus panggilan setelah 60 s ("The operation timed out", D-024).
 # - task_args: harus diakhiri "--", "{task}" agar tugas yang diawali `-` tetap satu argumen (D-019).
 # - login_status: perintah status login resmi CLI (claude_auth_status | codex_login_status), opsional (AGT-05).
 # - api_key_env:  nama variabel kunci API agen; bila ada di shell login, Settings memberi tahu bahwa agentdeck tidak
@@ -26,7 +28,7 @@ install = "curl -fsSL https://claude.ai/install.sh | bash"
 status = "osc7501_query"
 mcp_args = [
   "--mcp-config",
-  '{"mcpServers":{"agentdeck":{"type":"http","url":"${AGENTDECK_MCP_URL}","headers":{"Authorization":"Bearer ${AGENTDECK_TOKEN}"}}}}',
+  '{"mcpServers":{"agentdeck":{"type":"http","url":"${AGENTDECK_MCP_URL}","headers":{"Authorization":"Bearer ${AGENTDECK_TOKEN}"},"timeout":330000}}}',
   "--allowedTools",
   "mcp__agentdeck",
 ]
