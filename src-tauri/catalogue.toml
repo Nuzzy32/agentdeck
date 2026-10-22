@@ -6,7 +6,14 @@
 #              osc7501 = agen melapor tanpa query (Codex).
 # - mcp_args:  argv injeksi MCP. `{mcp_url}` diganti URL server lokal. Token tidak pernah masuk argv: agen membacanya
 #              dari env AGENTDECK_TOKEN (Claude mengekspansi `${VAR}` sendiri).
+#              Opsional untuk agen pengguna: tanpa mcp_args agen jalan tanpa injeksi.
 # - task_args: harus diakhiri "--", "{task}" agar tugas yang diawali `-` tetap satu argumen (D-019).
+# - login_status: perintah status login resmi CLI (claude_auth_status | codex_login_status), opsional (AGT-05).
+# - api_key_env:  nama variabel kunci API agen; bila ada di shell login, Settings memberi tahu bahwa agentdeck tidak
+#                 meneruskannya (D-019). Nilainya tidak pernah dibaca.
+#
+# Katalog pengguna: `agents.toml` di direktori data aplikasi, format sama, status boleh "none". Agen ber-id bawaan
+# diabaikan kecuali `replace = true` (D-023).
 #
 # Flag bypass izin (--dangerously-*, --yolo, bypassPermissions, -a/-s, approval_policy, ...) ditolak saat parse
 # (AGENTS.md aturan 4).
@@ -24,6 +31,8 @@ mcp_args = [
   "mcp__agentdeck",
 ]
 task_args = ["--", "{task}"]
+login_status = "claude_auth_status"
+api_key_env = ["ANTHROPIC_API_KEY"]
 
 [[agents]]
 id = "codex"
@@ -38,3 +47,5 @@ mcp_args = [
   "-c", "mcp_servers.agentdeck.tool_timeout_sec=330",
 ]
 task_args = ["--", "{task}"]
+login_status = "codex_login_status"
+api_key_env = ["OPENAI_API_KEY"]

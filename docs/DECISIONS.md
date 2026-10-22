@@ -259,3 +259,24 @@ dibanjiri output berwarna (throughput tidak berubah). Tes kredit di `pty.rs` kin
 Diuji 2026-10-22 dengan Claude Code 2.1.306 dan Codex 0.163.0 di `pnpm tauri dev`: Claude `idle` setelah query
 dijawab; dengan tugas awal `idle → working → blocked:kind=auth` ("perlu login", login pemilik kedaluwarsa); Codex
 `idle`. Bagian `mcpServers` di `~/.claude.json` dan shasum `~/.codex/config.toml` sama sebelum/sesudah.
+
+## D-023 — T4.4/T4.5: katalog pengguna, path manual, info login, nama kunci API (2026-10-22)
+- **Katalog pengguna** `agents.toml` di direktori data aplikasi, format sama dengan `catalogue.toml` dan validasi yang
+  sama (flag bypass, `task_args`, id unik). Berkas yang tidak terbaca atau tidak sah diabaikan **utuh** dengan peringatan
+  di stderr; aplikasi tetap jalan dengan katalog bawaan. Agen ber-id bawaan diabaikan kecuali `replace = true` (dicatat
+  di stderr saat dimuat). Tambahan skema: `mcp_args` opsional (tanpa itu agen jalan tanpa injeksi dan tidak menerima
+  `AGENTDECK_*`/token), `status = "none"` (tanpa pemindaian OSC 7501), `login_status`, `api_key_env`.
+- **Path manual** di `agent-paths.json` (`{"<id>": "/jalur"}`), ditulis atomik (tmp + rename). Disimpan hanya bila
+  absolut, berkas biasa, dan dapat dieksekusi; diperiksa lagi saat peluncuran. Path manual yang tidak sah lagi menjadi
+  galat peluncuran, tidak jatuh diam-diam ke `PATH`.
+- **Info login** hanya lewat perintah status resmi CLI dengan env dari nol (sama dengan env pane, jadi kunci API milik
+  agentdeck tidak memengaruhi hasil) dan batas waktu 5 detik: `claude auth status --json` → `authMethod` +
+  `subscriptionType` (email/org tidak diambil); `codex login status` → hanya frasa tetap `chatgpt`/`api_key`/`none`.
+  Pada mode kunci API Codex mencetak potongan kunci yang disamarkan; baris itu dibuang, tidak disimpan atau dicatat.
+  agentdeck sendiri tidak membuka berkas kredensial atau keychain. **Untuk ditinjau pemilik:** bila `codex login status`
+  dianggap terlalu dekat dengan kredensial, hapus `login_status` dari entri Codex di `catalogue.toml` (hasilnya `null`).
+- **Nama kunci API** (`api_key_env` di katalog: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`) dideteksi dengan
+  `printenv NAMA >/dev/null` di dalam `$SHELL -l -i -c`; nilai tidak pernah keluar dari shell. Nama divalidasi sebagai
+  nama variabel saat katalog dimuat karena disisipkan ke skrip shell. Diperiksa ulang setiap `agents_info`.
+- `Catalogue::builtin()` kini mengembalikan katalog yang berlaku (bawaan + pengguna + path manual) karena dipakai
+  `panes.rs`; katalog murni lewat `Catalogue::embedded()`.
