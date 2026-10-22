@@ -28,6 +28,24 @@
   --dur-out: 120ms;
 }
 
+/* Terminal theme (TERM-07): "Sistem" follows the app tokens; Gelap/Terang pin the matching token values on the pane
+   (data-term-theme). The 16 ANSI colours stay xterm.js defaults. */
+:root {
+  --term-bg: var(--bg);
+  --term-fg: var(--fg);
+  --term-accent: var(--accent);
+}
+[data-term-theme="dark"] {
+  --term-bg: #0e1116;
+  --term-fg: #e6e9ef;
+  --term-accent: #5b9dff;
+}
+[data-term-theme="light"] {
+  --term-bg: #ffffff;
+  --term-fg: #1a1d23;
+  --term-accent: #1a63d4;
+}
+
 @media (prefers-color-scheme: dark) {
   :root {
     --bg: #0e1116;

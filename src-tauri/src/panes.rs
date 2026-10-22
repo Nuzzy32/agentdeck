@@ -227,8 +227,10 @@ pub struct Registry {
     tokens: TokenRegistry,
     next_pane: u32,
     next_workspace: u32,
-    /// Configurable limits; settings (T3.3) will set them. Only the loop guard is read here.
+    /// Configurable limits, kept current by `settings::apply`. Only the loop guard is read here.
     pub limits: Limits,
+    /// "Saling kirim" of a workspace created from now on (`settings::apply`).
+    pub peer_default: bool,
     delivery: Delivery,
     // ponytail: every message of the run stays in memory for the panel; cap it if runs ever get that long.
     messages: Vec<Record>,
@@ -247,8 +249,11 @@ impl std::fmt::Debug for Entry {
 impl Registry {
     pub fn create_workspace(&mut self) -> u32 {
         self.next_workspace += 1;
-        self.workspaces
-            .insert(self.next_workspace, Workspace::default());
+        let ws = Workspace {
+            peer: self.peer_default,
+            ..Workspace::default()
+        };
+        self.workspaces.insert(self.next_workspace, ws);
         self.next_workspace
     }
 

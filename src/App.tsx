@@ -3,7 +3,7 @@ import { Channel, invoke } from "@tauri-apps/api/core";
 import { homeDir } from "@tauri-apps/api/path";
 import { createCollab, EMPTY, pendingByPane, tauriClient } from "./core/messages";
 import "./layout/layout.css";
-import { FONT, nextFontSize, shortcut } from "./layout/keys";
+import { nextFontSize, shortcut } from "./layout/keys";
 import { MESSAGES_BREAKPOINT, panelOpen, type PanelOverride, SIDEBAR_BREAKPOINT, togglePanel } from "./layout/logic";
 import {
   type AgentInfo,
@@ -37,6 +37,8 @@ import { canSplit, type Dir, leaves, neighbor, type Rect, rects, remove, setRati
 import { Launcher, SHELL } from "./launcher/Launcher";
 import { serial } from "./pane/io";
 import { measureCell } from "./pane/TerminalPane";
+import { type Section, SettingsModal } from "./settings/SettingsModal";
+import { TerminalContext, useSettings } from "./settings/settings";
 
 function useWindowWidth(): number {
   const [width, setWidth] = useState(window.innerWidth);
@@ -96,11 +98,12 @@ function App() {
   const [activeId, setActiveId] = useState<number | null>(null);
   const [closing, setClosing] = useState<string | null>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
-  const [fontSize, setFontSize] = useState(FONT.base);
   const [sidebar, setSidebar] = useState<PanelOverride>(null);
   const [messages, setMessages] = useState<PanelOverride>(null);
   const [agents, setAgents] = useState<AgentInfo[] | null>(null);
   const [launcher, setLauncher] = useState<LauncherTarget | null>(null);
+  // Open Settings section, or null.
+  const [settingsAt, setSettingsAt] = useState<Section | null>(null);
   // The launcher preselects what was launched last.
   const [choice, setChoice] = useState(SHELL);
   const [recents, setRecents] = useState(loadRecents);
@@ -126,15 +129,30 @@ function App() {
   useEffect(() => collab.start(), [collab]);
   // The core names workspaces by its own number; its message and loop guard commands take it as a string.
   const wsKey = activeId === null ? null : String(activeId);
-  useEffect(() => {
-    if (wsKey !== null) void collab.load(wsKey);
-  }, [collab, wsKey]);
   const shared = useSyncExternalStore(collab.subscribe, () => (wsKey === null ? EMPTY : collab.get(wsKey)));
   const pending = pendingByPane(shared.messages);
   const withPending = (p: Pane): Pane => ({ ...p, pending: pending[p.id] ?? 0 });
 
+  const toast = (text: string) => {
+    const id = ids.current.toast++;
+    setToasts((list) => [...list, { id, text }].slice(-3));
+    setTimeout(() => setToasts((list) => list.filter((t) => t.id !== id)), TOAST_MS);
+  };
+
+  const { settings, update: updateSettings } = useSettings(toast);
+  const term = settings.terminal;
+  const fontSize = term.font_size;
+  // A new loop guard limit applies at once in the core; the counter shows it without waiting for the next message.
+  const loopLimit = settings.limits.loop_guard;
+  useEffect(() => {
+    if (wsKey !== null) void collab.load(wsKey);
+  }, [collab, wsKey, loopLimit]);
+
   const active = workspaces.find((ws) => ws.id === activeId) ?? null;
-  const cell = useMemo(() => measureCell(fontSize), [fontSize]);
+  const cell = useMemo(
+    () => measureCell(fontSize, term.font_family, term.line_height),
+    [fontSize, term.font_family, term.line_height],
+  );
   const sidebarOpen = panelOpen(width, SIDEBAR_BREAKPOINT, sidebar);
   const messagesOpen = active !== null && panelOpen(width, MESSAGES_BREAKPOINT, messages);
 
@@ -147,12 +165,6 @@ function App() {
     panes: leaves(ws.tree).flatMap((id) => (panes[id] ? [ws.id === activeId ? withPending(panes[id]) : panes[id]] : [])),
   }));
   const activeView = views.find((v) => v.id === activeId) ?? null;
-
-  const toast = (text: string) => {
-    const id = ids.current.toast++;
-    setToasts((list) => [...list, { id, text }].slice(-3));
-    setTimeout(() => setToasts((list) => list.filter((t) => t.id !== id)), TOAST_MS);
-  };
 
   const updateWs = (id: number, fn: (ws: Workspace) => Workspace) =>
     setWorkspaces((list) => list.map((ws) => (ws.id === id ? fn(ws) : ws)));
@@ -404,7 +416,7 @@ function App() {
   useEffect(() => {
     // Capture phase, so a shortcut never reaches xterm.js; unmapped keys (⌘C, ⌘V, Ctrl, ⌥) pass through untouched.
     const onKey = (e: KeyboardEvent) => {
-      if (closing !== null || launcher !== null || peerAsk !== null) return;
+      if (closing !== null || launcher !== null || peerAsk !== null || settingsAt !== null) return;
       const action = shortcut(e);
       if (!action) return;
       e.preventDefault();
@@ -430,8 +442,12 @@ function App() {
           return toggleMessages();
         case "jump":
           return ribbonButton.current?.focus();
-        case "font":
-          return setFontSize((size) => nextFontSize(size, action.delta));
+        case "font": {
+          const next = nextFontSize(fontSize, action.delta);
+          return next === fontSize ? undefined : updateSettings({ terminal: { font_size: next } });
+        }
+        case "settings":
+          return setSettingsAt("agents");
       }
     };
     window.addEventListener("keydown", onKey, true);
@@ -441,114 +457,131 @@ function App() {
   const closingPane = closing ? panes[closing] : undefined;
 
   return (
-    <div className="app">
-      <TitleBar
-        workspace={activeView}
-        sidebarOpen={sidebarOpen}
-        messagesOpen={messagesOpen}
-        onToggleSidebar={toggleSidebar}
-        onToggleMessages={toggleMessages}
-      />
-      <div className="main">
-        {sidebarOpen ? (
-          <Sidebar
-            workspaces={views}
-            active={activeView}
-            focusedPane={active?.focused ?? null}
-            onNewWorkspace={() => newWorkspace()}
-            onSelectWorkspace={setActiveId}
-            onFocusPane={focusPane}
+    <TerminalContext.Provider value={term}>
+      <div className="app">
+        <TitleBar
+          workspace={activeView}
+          sidebarOpen={sidebarOpen}
+          messagesOpen={messagesOpen}
+          onToggleSidebar={toggleSidebar}
+          onToggleMessages={toggleMessages}
+        />
+        <div className="main">
+          {sidebarOpen ? (
+            <Sidebar
+              workspaces={views}
+              active={activeView}
+              focusedPane={active?.focused ?? null}
+              onNewWorkspace={() => newWorkspace()}
+              onSelectWorkspace={setActiveId}
+              onFocusPane={focusPane}
+              onSettings={() => setSettingsAt("agents")}
+            />
+          ) : null}
+          <main className="workspace">
+            {active && wsKey !== null ? (
+              <>
+                <LoopRibbon
+                  guard={shared.guard}
+                  focusRef={ribbonButton}
+                  onContinue={() => void act("Antrean tidak bisa dilanjutkan", collab.continueLoop(wsKey))}
+                  onStop={() => void act("Antrean tidak bisa dihentikan", collab.stopLoop(wsKey))}
+                  onShowLog={showMessages}
+                />
+                {/* Keyed by workspace: switching unmounts the other workspace's panes, which detaches (not closes)
+                    them; coming back attaches again and the core replays their buffer. */}
+                <SplitView
+                  key={active.id}
+                  tree={active.tree}
+                  zoomed={active.zoomed}
+                  cell={cell}
+                  onSize={(r) => {
+                    area.current = r;
+                  }}
+                  onRatio={(path, ratio) => updateWs(active.id, (w) => ({ ...w, tree: setRatio(w.tree, path, ratio) }))}
+                  renderPane={(id) => {
+                    const pane = panes[id];
+                    return pane ? (
+                      <PaneView
+                        pane={withPending(pane)}
+                        focused={id === active.focused}
+                        zoomed={id === active.zoomed}
+                        fontSize={fontSize}
+                        actions={{
+                          onFocus: () => focusPane(id),
+                          onSplit: (dir) => splitPane(dir, id),
+                          onZoom: () => toggleZoom(id),
+                          onClose: () => requestClose(id),
+                          onActivity: (busy) => setActivity(id, busy),
+                          onRestart: () => restart(id, false),
+                          onShellHere: () => restart(id, true),
+                        }}
+                      />
+                    ) : null;
+                  }}
+                />
+              </>
+            ) : (
+              <EmptyState agents={agents} onStart={newWorkspace} onSettings={() => setSettingsAt("collab")} />
+            )}
+          </main>
+          {activeView && wsKey !== null && messagesOpen ? (
+            <MessagesPanel
+              workspace={activeView}
+              messages={shared.messages}
+              onDiscard={(id) => void act("Pesan tidak bisa dibuang", collab.drop(wsKey, id))}
+            />
+          ) : null}
+        </div>
+        <StatusBar
+          guard={shared.guard}
+          peer={wsKey === null ? null : shared.peer}
+          spawn={settings.spawn_enabled}
+          onPeer={requestPeer}
+          onSpawnSettings={() => setSettingsAt("collab")}
+        />
+        {closingPane ? (
+          <CloseDialog
+            pane={closingPane}
+            childCount={Object.values(panes).filter((p) => p.parent === closingPane.id).length}
+            onConfirm={() => closePane(closingPane.id)}
+            onCancel={() => setClosing(null)}
           />
         ) : null}
-        <main className="workspace">
-          {active && wsKey !== null ? (
-            <>
-              <LoopRibbon
-                guard={shared.guard}
-                focusRef={ribbonButton}
-                onContinue={() => void act("Antrean tidak bisa dilanjutkan", collab.continueLoop(wsKey))}
-                onStop={() => void act("Antrean tidak bisa dihentikan", collab.stopLoop(wsKey))}
-                onShowLog={showMessages}
-              />
-              {/* Keyed by workspace: switching unmounts the other workspace's panes, which detaches (not closes)
-                  them; coming back attaches again and the core replays their buffer. */}
-              <SplitView
-                key={active.id}
-                tree={active.tree}
-                zoomed={active.zoomed}
-                cell={cell}
-                onSize={(r) => {
-                  area.current = r;
-                }}
-                onRatio={(path, ratio) => updateWs(active.id, (w) => ({ ...w, tree: setRatio(w.tree, path, ratio) }))}
-                renderPane={(id) => {
-                  const pane = panes[id];
-                  return pane ? (
-                    <PaneView
-                      pane={withPending(pane)}
-                      focused={id === active.focused}
-                      zoomed={id === active.zoomed}
-                      fontSize={fontSize}
-                      actions={{
-                        onFocus: () => focusPane(id),
-                        onSplit: (dir) => splitPane(dir, id),
-                        onZoom: () => toggleZoom(id),
-                        onClose: () => requestClose(id),
-                        onActivity: (busy) => setActivity(id, busy),
-                        onRestart: () => restart(id, false),
-                        onShellHere: () => restart(id, true),
-                      }}
-                    />
-                  ) : null;
-                }}
-              />
-            </>
-          ) : (
-            <EmptyState agents={agents} onStart={newWorkspace} />
-          )}
-        </main>
-        {activeView && wsKey !== null && messagesOpen ? (
-          <MessagesPanel
-            workspace={activeView}
-            messages={shared.messages}
-            onDiscard={(id) => void act("Pesan tidak bisa dibuang", collab.drop(wsKey, id))}
+        {peerAsk && activeView ? (
+          <PeerDialog
+            workspace={activeView.name}
+            limit={shared.guard.limit}
+            onConfirm={() => answerPeer(true)}
+            onCancel={() => answerPeer(false)}
           />
         ) : null}
+        {launcher ? (
+          <Launcher
+            title={LAUNCHER_TITLE[launcher.kind === "workspace" ? "workspace" : launcher.dir]}
+            agents={agents}
+            initial={choice}
+            folder={
+              (launcher.kind === "split" ? panes[launcher.target]?.cwd : undefined) ??
+              (active ? (panes[active.focused]?.cwd ?? active.folder) : (home ?? ""))
+            }
+            recents={recents}
+            home={home}
+            onLaunch={launch}
+            onClose={() => setLauncher(null)}
+          />
+        ) : null}
+        {settingsAt ? (
+          <SettingsModal
+            initial={settingsAt}
+            settings={settings}
+            onChange={updateSettings}
+            onClose={() => setSettingsAt(null)}
+          />
+        ) : null}
+        <Toasts toasts={toasts} onDismiss={(id) => setToasts((list) => list.filter((t) => t.id !== id))} />
       </div>
-      <StatusBar guard={shared.guard} peer={wsKey === null ? null : shared.peer} onPeer={requestPeer} />
-      {closingPane ? (
-        <CloseDialog
-          pane={closingPane}
-          childCount={Object.values(panes).filter((p) => p.parent === closingPane.id).length}
-          onConfirm={() => closePane(closingPane.id)}
-          onCancel={() => setClosing(null)}
-        />
-      ) : null}
-      {peerAsk && activeView ? (
-        <PeerDialog
-          workspace={activeView.name}
-          limit={shared.guard.limit}
-          onConfirm={() => answerPeer(true)}
-          onCancel={() => answerPeer(false)}
-        />
-      ) : null}
-      {launcher ? (
-        <Launcher
-          title={LAUNCHER_TITLE[launcher.kind === "workspace" ? "workspace" : launcher.dir]}
-          agents={agents}
-          initial={choice}
-          folder={
-            (launcher.kind === "split" ? panes[launcher.target]?.cwd : undefined) ??
-            (active ? (panes[active.focused]?.cwd ?? active.folder) : (home ?? ""))
-          }
-          recents={recents}
-          home={home}
-          onLaunch={launch}
-          onClose={() => setLauncher(null)}
-        />
-      ) : null}
-      <Toasts toasts={toasts} onDismiss={(id) => setToasts((list) => list.filter((t) => t.id !== id))} />
-    </div>
+    </TerminalContext.Provider>
   );
 }
 

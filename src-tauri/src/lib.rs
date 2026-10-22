@@ -6,6 +6,7 @@ pub mod panes;
 pub mod policy;
 pub mod pty;
 pub mod screen;
+pub mod settings;
 pub mod status;
 pub mod store;
 pub mod tokens;
@@ -112,6 +113,49 @@ async fn workspace_get_peer(
     Ok(panes::lock(&engine.panes).peer(workspace.id()?))
 }
 
+#[tauri::command]
+async fn settings_get() -> settings::Settings {
+    settings::get()
+}
+
+/// Validated and saved before it takes effect; the registry and the WebView learn the new values at once.
+#[tauri::command]
+async fn settings_set(
+    app: tauri::AppHandle,
+    engine: tauri::State<'_, delivery::Engine>,
+    patch: serde_json::Value,
+) -> Result<settings::Settings, String> {
+    use tauri::Emitter;
+    let s = settings::set(patch)?;
+    settings::apply(&s, &mut panes::lock(&engine.panes));
+    let _ = app.emit("agentdeck://settings-changed", &s);
+    Ok(s)
+}
+
+/// Settings › Tentang: shows the log folder in the file manager.
+#[tauri::command]
+async fn logs_open(app: tauri::AppHandle) -> Result<(), String> {
+    use tauri::Manager;
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?
+        .join("logs");
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let opener = if cfg!(target_os = "macos") {
+        "open"
+    } else if cfg!(windows) {
+        "explorer"
+    } else {
+        "xdg-open"
+    };
+    std::process::Command::new(opener)
+        .arg(&dir)
+        .spawn()
+        .map(drop)
+        .map_err(|e| format!("Folder log tidak bisa dibuka: {e}"))
+}
+
 #[derive(Clone, serde::Serialize)]
 struct WorkspaceChanged {
     workspace: String,
@@ -127,10 +171,15 @@ pub fn run() -> tauri::Result<()> {
             std::thread::spawn(|| {
                 catalogue::login_path();
             });
-            let panes = panes::Panes::default();
             let pm = pty::PaneManager::default();
+            let data_dir = app.path().app_data_dir();
+            if let Some(warning) = settings::init(data_dir.as_deref().ok()) {
+                eprintln!("agentdeck: {warning}");
+            }
+            let panes = panes::Panes::default();
+            settings::apply(&settings::get(), &mut panes::lock(&panes));
             // Without a data dir messages still flow, only unlogged.
-            let store = match app.path().app_data_dir() {
+            let store = match data_dir {
                 Ok(dir) => {
                     let store = store::Store::new(&dir);
                     if let Err(e) = store.prune(std::time::SystemTime::now()) {
@@ -188,6 +237,9 @@ pub fn run() -> tauri::Result<()> {
             loop_guard_stop,
             workspace_set_peer,
             workspace_get_peer,
+            settings_get,
+            settings_set,
+            logs_open,
         ])
         .build(tauri::generate_context!())?
         .run(|app, event| {

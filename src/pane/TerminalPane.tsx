@@ -1,41 +1,30 @@
-import { useEffect, useRef } from "react";
+import { useContext, useEffect, useRef } from "react";
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebglAddon } from "@xterm/addon-webgl";
-import { type ITheme, Terminal } from "@xterm/xterm";
+import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
+import { TerminalContext, xtermTheme } from "../settings/settings";
 import { activity, cumulativeAcker, inputClock, serial, writeQueue } from "./io";
 
-function token(name: string): string {
-  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+/** A CSS variable as resolved on `el`, where the pane's `data-term-theme` applies. */
+function reader(el: Element = document.documentElement): (name: string) => string {
+  const style = getComputedStyle(el);
+  return (name) => style.getPropertyValue(name).trim();
 }
-
-/** Terminal colours from tokens.css (UI-UX §6); the 16 ANSI colours stay xterm.js defaults. */
-function theme(): ITheme {
-  return {
-    background: token("--bg"),
-    foreground: token("--fg"),
-    cursor: token("--fg"),
-    cursorAccent: token("--bg"),
-    // Tokens are #rrggbb, so a hex alpha suffix gives a translucent selection.
-    selectionBackground: `${token("--accent")}4d`,
-  };
-}
-
-const LINE_HEIGHT = 1.2;
 
 /**
  * Terminal cell size in CSS pixels for the split limit (UI-UX §2). Mirrors xterm.js: the measured glyph is snapped to
  * device pixels (width floored, height ceiled), then the height is scaled by the line height and floored.
  */
-export function measureCell(fontSize: number): { w: number; h: number } {
+export function measureCell(fontSize: number, fontFamily: string, lineHeight: number): { w: number; h: number } {
   const dpr = window.devicePixelRatio || 1;
   const ctx = document.createElement("canvas").getContext("2d");
-  if (!ctx) return { w: fontSize * 0.6, h: Math.floor(fontSize * 1.2 * LINE_HEIGHT) };
-  ctx.font = `${fontSize}px ${token("--font-mono")}`;
+  if (!ctx) return { w: fontSize * 0.6, h: Math.floor(fontSize * 1.2 * lineHeight) };
+  ctx.font = `${fontSize}px ${fontFamily}`;
   const m = ctx.measureText("W");
   const charH = m.fontBoundingBoxAscent + m.fontBoundingBoxDescent || fontSize * 1.2;
-  return { w: Math.floor(m.width * dpr) / dpr, h: Math.floor(Math.ceil(charH * dpr) * LINE_HEIGHT) / dpr };
+  return { w: Math.floor(m.width * dpr) / dpr, h: Math.floor(Math.ceil(charH * dpr) * lineHeight) / dpr };
 }
 
 /** DOM events that mean the person is typing or pasting; see inputClock. */
@@ -61,18 +50,22 @@ export function TerminalPane({
   const activityCb = useRef(onActivity);
   activityCb.current = onActivity;
   const term = useRef<{ t: Terminal; fit: FitAddon } | null>(null);
-  // Read once at creation; later changes go through the fontSize effect without recreating the terminal.
-  const initialFont = useRef(fontSize);
+  // Font, scrollback, theme (TERM-07). Read once at creation; later changes go through the effects below without
+  // recreating the terminal.
+  const cfg = useContext(TerminalContext);
+  const initial = useRef({ fontSize, cfg });
 
   useEffect(() => {
     const el = host.current;
     if (!el) return;
+    const { fontSize: size, cfg: c } = initial.current;
     const t = new Terminal({
-      fontFamily: token("--font-mono"),
-      fontSize: initialFont.current,
-      lineHeight: LINE_HEIGHT,
-      theme: theme(),
-      scrollback: 10000,
+      fontFamily: c.font_family,
+      fontSize: size,
+      lineHeight: c.line_height,
+      theme: xtermTheme(reader(el)),
+      scrollback: c.scrollback,
+      screenReaderMode: c.screen_reader,
     });
     const fit = new FitAddon();
     t.loadAddon(fit);
@@ -115,7 +108,7 @@ export function TerminalPane({
     ro.observe(el);
     const scheme = matchMedia("(prefers-color-scheme: dark)");
     const onScheme = () => {
-      t.options.theme = theme();
+      t.options.theme = xtermTheme(reader(el));
     };
     scheme.addEventListener("change", onScheme);
 
@@ -144,5 +137,26 @@ export function TerminalPane({
     cur.fit.fit();
   }, [fontSize]);
 
-  return <div ref={host} className="pane-term" />;
+  useEffect(() => {
+    const cur = term.current;
+    if (!cur) return;
+    const o = cur.t.options;
+    if (o.fontFamily !== cfg.font_family || o.lineHeight !== cfg.line_height) {
+      o.fontFamily = cfg.font_family;
+      o.lineHeight = cfg.line_height;
+      cur.fit.fit();
+    }
+    if (o.scrollback !== cfg.scrollback) o.scrollback = cfg.scrollback;
+    if (o.screenReaderMode !== cfg.screen_reader) o.screenReaderMode = cfg.screen_reader;
+  }, [cfg.font_family, cfg.line_height, cfg.scrollback, cfg.screen_reader]);
+
+  // The attribute is already on the host when this runs, so the computed colours are the new theme's.
+  useEffect(() => {
+    const cur = term.current;
+    if (cur && host.current) cur.t.options.theme = xtermTheme(reader(host.current));
+  }, [cfg.theme]);
+
+  return (
+    <div ref={host} className="pane-term" data-term-theme={cfg.theme === "system" ? undefined : cfg.theme} />
+  );
 }

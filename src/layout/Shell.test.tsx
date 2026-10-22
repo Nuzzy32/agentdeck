@@ -57,7 +57,8 @@ describe("LoopRibbon", () => {
 });
 
 describe("StatusBar", () => {
-  const bar = (guard: LoopGuard, peer: boolean | null, onPeer = vi.fn()) => StatusBar({ guard, peer, onPeer });
+  const bar = (guard: LoopGuard, peer: boolean | null, onPeer = vi.fn(), spawn = false, onSpawnSettings = vi.fn()) =>
+    StatusBar({ guard, peer, spawn, onPeer, onSpawnSettings });
 
   it("turns the loop counter amber at 75% of the limit", () => {
     const at = (count: number) => renderToStaticMarkup(bar({ count, limit: 12, paused: false }, false));
@@ -73,6 +74,13 @@ describe("StatusBar", () => {
     expect(onPeer).toHaveBeenLastCalledWith(true);
     button(bar(EMPTY.guard, true, onPeer), "Saling kirim: aktif").props.onClick?.();
     expect(onPeer).toHaveBeenLastCalledWith(false);
+  });
+
+  it("Agen membuka pane shows the Settings switch and opens Settings › Kolaborasi", () => {
+    const open = vi.fn();
+    expect(renderToStaticMarkup(bar(EMPTY.guard, null, vi.fn(), true))).toContain("Agen membuka pane: aktif");
+    button(bar(EMPTY.guard, null, vi.fn(), false, open), "Agen membuka pane: mati").props.onClick?.();
+    expect(open).toHaveBeenCalledOnce();
   });
 
   it("without a workspace or the core's data, shows the empty state and a disabled switch", () => {
