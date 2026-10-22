@@ -63,6 +63,7 @@ export function Sidebar({
   onNewWorkspace,
   onSelectWorkspace,
   onFocusPane,
+  onSettings,
 }: {
   workspaces: WorkspaceView[];
   active: WorkspaceView | null;
@@ -70,6 +71,7 @@ export function Sidebar({
   onNewWorkspace: () => void;
   onSelectWorkspace: (id: number) => void;
   onFocusPane: (id: string) => void;
+  onSettings: () => void;
 }) {
   return (
     <nav className="sidebar" aria-label="Workspace dan pane">
@@ -147,7 +149,7 @@ export function Sidebar({
         </>
       ) : null}
 
-      <button type="button" className="row sidebar-settings" title="Settings (⌘,)">
+      <button type="button" className="row sidebar-settings" title="Settings (⌘,)" onClick={onSettings}>
         <Icon name="settings" />
         Settings
       </button>
@@ -219,17 +221,23 @@ export function LoopRibbon({
   );
 }
 
-/** UI-UX §4.5. MCP and "Agen membuka pane" stay static until the core reports them (T3.3). */
+/** UI-UX §4.5. MCP stays static until the core reports it. */
 export function StatusBar({
   guard,
   peer,
+  spawn,
   onPeer,
+  onSpawnSettings,
 }: {
   guard: LoopGuard;
   /** Null without a workspace: the switch has nothing to act on. */
   peer: boolean | null;
+  /** "Agen boleh membuka pane" from Settings. */
+  spawn: boolean;
   /** Asks for the switch to become `on`. */
   onPeer: (on: boolean) => void;
+  /** Opens Settings › Kolaborasi. */
+  onSpawnSettings: () => void;
 }) {
   const amber = nearLimit(guard.count, guard.limit);
   return (
@@ -238,8 +246,8 @@ export function StatusBar({
         <span className="dot dot-idle" aria-hidden="true" />
         MCP aktif
       </button>
-      <button type="button" className="status-item" title="Buka Settings › Kolaborasi">
-        Agen membuka pane: mati
+      <button type="button" className="status-item" title="Buka Settings › Kolaborasi" onClick={onSpawnSettings}>
+        Agen membuka pane: {spawn ? "aktif" : "mati"}
       </button>
       <button
         type="button"
@@ -264,7 +272,16 @@ export function StatusBar({
 }
 
 /** UI-UX §4.7. Each choice opens the launcher with that program selected; agents not yet checked show as such. */
-export function EmptyState({ agents, onStart }: { agents: AgentInfo[] | null; onStart: (choice: string) => void }) {
+export function EmptyState({
+  agents,
+  onStart,
+  onSettings,
+}: {
+  agents: AgentInfo[] | null;
+  onStart: (choice: string) => void;
+  /** Opens Settings › Kolaborasi. */
+  onSettings: () => void;
+}) {
   const choices = [
     { id: SHELL, name: "Shell", installed: true as boolean | null },
     ...(agents ?? [
@@ -297,7 +314,7 @@ export function EmptyState({ agents, onStart }: { agents: AgentInfo[] | null; on
         <br />
         Agen bisa saling memberi tugas setelah kamu mengizinkannya di Settings.
       </p>
-      <button type="button" className="link-btn">
+      <button type="button" className="link-btn" onClick={onSettings}>
         Settings › Kolaborasi
       </button>
     </div>

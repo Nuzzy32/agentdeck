@@ -400,7 +400,7 @@
   flex: 1;
   min-height: 0;
   overflow: hidden;
-  background: var(--bg);
+  background: var(--term-bg);
 }
 /* Padding on .xterm, not the host: FitAddon measures the host and subtracts the .xterm padding. */
 .pane-term .xterm {
@@ -409,7 +409,7 @@
 }
 /* xterm.css paints the viewport (padding included) #000, which shows as a black frame in the light theme. */
 .pane-term .xterm .xterm-viewport {
-  background: var(--bg);
+  background: var(--term-bg);
 }
 
 .pane-body {
