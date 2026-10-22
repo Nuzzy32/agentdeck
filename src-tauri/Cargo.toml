@@ -26,6 +26,8 @@ base64 = "0.22"
 # Katalog agen TOML (catalogue.rs). Keduanya sudah ada di pohon dependency Tauri; tidak menambah crate baru.
 serde = { version = "1", features = ["derive"] }
 toml = "1"
+# Headless terminal screen per pane (screen.rs); proven against both TUIs in spike S7 (D-013).
+vt100 = "0.18"
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
