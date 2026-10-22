@@ -22,6 +22,22 @@ function theme(): ITheme {
   };
 }
 
+const LINE_HEIGHT = 1.2;
+
+/**
+ * Terminal cell size in CSS pixels for the split limit (UI-UX §2). Mirrors xterm.js: the measured glyph is snapped to
+ * device pixels (width floored, height ceiled), then the height is scaled by the line height and floored.
+ */
+export function measureCell(fontSize: number): { w: number; h: number } {
+  const dpr = window.devicePixelRatio || 1;
+  const ctx = document.createElement("canvas").getContext("2d");
+  if (!ctx) return { w: fontSize * 0.6, h: Math.floor(fontSize * 1.2 * LINE_HEIGHT) };
+  ctx.font = `${fontSize}px ${token("--font-mono")}`;
+  const m = ctx.measureText("W");
+  const charH = m.fontBoundingBoxAscent + m.fontBoundingBoxDescent || fontSize * 1.2;
+  return { w: Math.floor(m.width * dpr) / dpr, h: Math.floor(Math.ceil(charH * dpr) * LINE_HEIGHT) / dpr };
+}
+
 /** DOM events that mean the person is typing or pasting; see inputClock. */
 const INPUT_EVENTS = ["keydown", "paste", "input", "compositionend"];
 
@@ -29,17 +45,19 @@ const INPUT_EVENTS = ["keydown", "paste", "input", "compositionend"];
  * xterm.js view of a core pane. The PTY is created by the caller (StrictMode runs this effect twice), so mounting only
  * attaches and unmounting only detaches: the process keeps running and the core buffers its output for replay.
  */
-export function TerminalPane({ id, focused }: { id: number; focused: boolean }) {
+export function TerminalPane({ id, focused, fontSize }: { id: number; focused: boolean; fontSize: number }) {
   const host = useRef<HTMLDivElement>(null);
-  const term = useRef<Terminal | null>(null);
+  const term = useRef<{ t: Terminal; fit: FitAddon } | null>(null);
+  // Read once at creation; later changes go through the fontSize effect without recreating the terminal.
+  const initialFont = useRef(fontSize);
 
   useEffect(() => {
     const el = host.current;
     if (!el) return;
     const t = new Terminal({
       fontFamily: token("--font-mono"),
-      fontSize: parseFloat(token("--text-ui")),
-      lineHeight: 1.2,
+      fontSize: initialFont.current,
+      lineHeight: LINE_HEIGHT,
       theme: theme(),
       scrollback: 10000,
     });
@@ -54,7 +72,7 @@ export function TerminalPane({ id, focused }: { id: number; focused: boolean }) 
     } catch {
       // No WebGL2: the DOM renderer stays.
     }
-    term.current = t;
+    term.current = { t, fit };
     let live = true;
 
     const ack = cumulativeAcker((total) => {
@@ -100,8 +118,15 @@ export function TerminalPane({ id, focused }: { id: number; focused: boolean }) 
   }, [id]);
 
   useEffect(() => {
-    if (focused) term.current?.focus();
+    if (focused) term.current?.t.focus();
   }, [focused]);
+
+  useEffect(() => {
+    const cur = term.current;
+    if (!cur || cur.t.options.fontSize === fontSize) return;
+    cur.t.options.fontSize = fontSize;
+    cur.fit.fit();
+  }, [fontSize]);
 
   return <div ref={host} className="pane-term" />;
 }

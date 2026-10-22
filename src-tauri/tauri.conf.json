@@ -16,11 +16,26 @@
         "width": 1280,
         "height": 800,
         "minWidth": 900,
-        "minHeight": 600
+        "minHeight": 600,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true
       }
     ],
     "security": {
-      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:"
+      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:",
+      "capabilities": [
+        "default",
+        {
+          "identifier": "titlebar-drag",
+          "description": "Drag the window by the overlay title bar (data-tauri-drag-region).",
+          "windows": [
+            "main"
+          ],
+          "permissions": [
+            "core:window:allow-start-dragging"
+          ]
+        }
+      ]
     },
     "withGlobalTauri": false
   },

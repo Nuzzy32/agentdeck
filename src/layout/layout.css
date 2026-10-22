@@ -86,13 +86,13 @@
   text-decoration: underline;
 }
 
-/* Title bar */
+/* Title bar; the left padding clears the macOS window buttons drawn over it (titleBarStyle Overlay). */
 .titlebar {
   grid-column: 1 / -1;
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 0 8px;
+  padding: 0 8px 0 76px;
   background: var(--surface);
   border-bottom: 1px solid var(--line);
   min-width: 0;
@@ -266,15 +266,39 @@
   background: var(--bg);
 }
 
+.split-area {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  /* xterm.js layers use z-index; keep them inside the workspace so toasts stay on top. */
+  isolation: isolate;
+}
+.split-cell {
+  position: absolute;
+  display: flex;
+}
+.split-divider {
+  position: absolute;
+  background: var(--line);
+  touch-action: none;
+}
+.split-divider:hover {
+  background: var(--accent);
+}
+.split-divider-row {
+  cursor: col-resize;
+}
+.split-divider-col {
+  cursor: row-resize;
+}
+
 .pane {
   display: flex;
   flex-direction: column;
   flex: 1;
   min-height: 0;
+  min-width: 0;
   border: 1px solid transparent;
-}
-.pane + .pane {
-  border-top-color: var(--line);
 }
 .pane-focused {
   border-color: var(--accent);
@@ -382,6 +406,10 @@
 .pane-term .xterm {
   height: 100%;
   padding: 4px 8px;
+}
+/* xterm.css paints the viewport (padding included) #000, which shows as a black frame in the light theme. */
+.pane-term .xterm .xterm-viewport {
+  background: var(--bg);
 }
 
 .pane-body {
@@ -507,4 +535,72 @@
 .empty-text {
   margin: 0;
   color: var(--muted);
+}
+
+/* Close dialog, UI-UX §3 */
+.dialog {
+  width: 320px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--raised);
+  color: var(--fg);
+}
+.dialog::backdrop {
+  background: color-mix(in srgb, var(--bg) 50%, transparent);
+}
+.dialog-title {
+  margin: 0;
+  font-weight: 600;
+}
+.dialog-text {
+  margin: 8px 0 0;
+  color: var(--muted);
+}
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+.btn {
+  height: 24px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  cursor: pointer;
+}
+.btn-danger {
+  border-color: var(--danger);
+  background: var(--danger);
+  color: var(--bg);
+}
+
+/* Toasts, UI-UX §5 */
+.toasts {
+  position: fixed;
+  right: 12px;
+  bottom: 36px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  pointer-events: none;
+}
+.toast {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 4px 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--raised);
+  pointer-events: auto;
+  animation: toast-in var(--dur-in) var(--ease);
+}
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
 }
