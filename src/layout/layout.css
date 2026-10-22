@@ -1,0 +1,498 @@
+/* Window anatomy, docs/UI-UX.md §2–§4. Colours and fonts only via src/styles/tokens.css. */
+
+.app {
+  display: grid;
+  grid-template-rows: 32px minmax(0, 1fr) 24px;
+  height: 100%;
+  min-width: 900px;
+  min-height: 600px;
+}
+
+.main {
+  display: flex;
+  min-height: 0;
+  min-width: 0;
+}
+
+.mono {
+  font-family: var(--font-mono);
+}
+.faint {
+  color: var(--faint);
+}
+.ok {
+  color: var(--ok);
+}
+.warn {
+  color: var(--warn);
+}
+.danger {
+  color: var(--danger);
+}
+
+/* Buttons */
+.icon-btn,
+.text-btn,
+.link-btn,
+.row,
+.status-item,
+.message,
+.empty-choice {
+  border: 0;
+  background: none;
+  cursor: pointer;
+  border-radius: var(--radius);
+}
+
+.icon-btn {
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  flex: none;
+  color: var(--muted);
+}
+.icon-btn:hover,
+.text-btn:hover,
+.row:hover,
+.status-item:hover,
+.message:hover {
+  background: var(--raised);
+  color: var(--fg);
+}
+.icon-btn[aria-pressed="true"] {
+  color: var(--fg);
+}
+
+.text-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 8px;
+  color: var(--muted);
+  font-size: var(--text-label-lg);
+}
+.text-btn[aria-pressed="true"] {
+  color: var(--fg);
+}
+
+.link-btn {
+  padding: 2px 4px;
+  color: var(--accent);
+}
+.link-btn:hover {
+  text-decoration: underline;
+}
+
+/* Title bar */
+.titlebar {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+  min-width: 0;
+  white-space: nowrap;
+  user-select: none;
+}
+.titlebar-name {
+  font-weight: 600;
+}
+.titlebar-folder {
+  color: var(--muted);
+  font-size: var(--text-label-lg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Sidebar */
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  width: 200px;
+  flex: none;
+  padding: 4px;
+  background: var(--surface);
+  border-right: 1px solid var(--line);
+  overflow-y: auto;
+}
+
+.section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 28px;
+  padding: 0 4px 0 8px;
+  color: var(--faint);
+  font-size: var(--text-label);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.section-head + .section-head,
+.list + .section-head {
+  margin-top: 8px;
+}
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-height: 24px;
+  padding: 3px 8px;
+  text-align: left;
+  white-space: nowrap;
+}
+.row-active {
+  background: var(--raised);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+.row-workspace {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0;
+}
+.row-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.row-folder {
+  color: var(--faint);
+  font-size: var(--text-label);
+}
+.row-child {
+  padding-left: 12px;
+}
+.row-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.row-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--faint);
+  font-size: var(--text-label);
+}
+.row-meta.warn {
+  color: var(--warn);
+}
+.tree-elbow {
+  color: var(--faint);
+}
+.count {
+  min-width: 16px;
+  padding: 0 4px;
+  border-radius: var(--radius);
+  background: var(--line);
+  font-size: var(--text-label);
+  text-align: center;
+}
+.sidebar-empty {
+  margin: 0;
+  padding: 3px 8px;
+  color: var(--faint);
+}
+.sidebar-settings {
+  margin-top: auto;
+  color: var(--muted);
+}
+
+/* Status dot, UI-UX §3: shape carries the meaning, colour reinforces it. */
+.dot {
+  display: inline-grid;
+  place-items: center;
+  width: 10px;
+  height: 10px;
+  flex: none;
+  border-radius: 50%;
+  border: 1.5px solid currentColor;
+  color: var(--faint);
+  font-size: 8px;
+  font-weight: 700;
+  line-height: 1;
+}
+.dot-starting {
+  color: var(--muted);
+}
+.dot-working {
+  color: var(--accent);
+  background: linear-gradient(90deg, currentColor 50%, transparent 50%);
+  animation: pulse 1.4s var(--ease) infinite;
+}
+.dot-idle {
+  color: var(--ok);
+  background: currentColor;
+}
+.dot-needs_you {
+  width: 12px;
+  height: 12px;
+  border-color: var(--warn);
+  background: var(--warn);
+  color: var(--bg);
+}
+.dot-exited {
+  background: repeating-linear-gradient(45deg, currentColor 0 2px, transparent 2px 4px);
+}
+@keyframes pulse {
+  50% {
+    opacity: 0.45;
+  }
+}
+
+/* Workspace and panes */
+.workspace {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  background: var(--bg);
+}
+
+.pane {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  border: 1px solid transparent;
+}
+.pane + .pane {
+  border-top-color: var(--line);
+}
+.pane-focused {
+  border-color: var(--accent);
+}
+
+.pane-header {
+  container: pane-header / inline-size;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 28px;
+  flex: none;
+  padding: 0 8px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+  font-size: var(--text-label-lg);
+  white-space: nowrap;
+  min-width: 0;
+}
+.pane-focused .pane-header {
+  color: var(--fg);
+}
+
+.pane-status,
+.pane-id,
+.pane-agent,
+.badge,
+.pane-actions {
+  flex: none;
+}
+.pane-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.pane-agent {
+  font-weight: 600;
+}
+
+/* Shortening order (UI-UX §3): folder from the middle, then the title, then the folder disappears. */
+.pane-title {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pane-folder {
+  display: flex;
+  /* Huge factor so the title's weighted share rounds to 0 layout units; a small one still adds a stray ellipsis. */
+  flex: 0 1000000 auto;
+  min-width: 0;
+  color: var(--faint);
+}
+.pane-folder-head {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pane-folder-tail {
+  flex: none;
+}
+.pane-spacer {
+  flex: 1 1 0;
+  min-width: 0;
+}
+.pane-actions {
+  display: inline-flex;
+  gap: 2px;
+}
+
+.badge {
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  font-size: var(--text-label);
+  line-height: 16px;
+}
+.chip {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* ponytail: width thresholds approximate "title already elided"; measure text if the order ever looks wrong. */
+@container pane-header (max-width: 520px) {
+  .pane-folder {
+    display: none;
+  }
+}
+@container pane-header (max-width: 420px) {
+  .pane-status-label,
+  .pane-relation {
+    display: none;
+  }
+}
+
+.pane-body {
+  flex: 1;
+  min-height: 0;
+  padding: 8px;
+  overflow: hidden;
+  color: var(--faint);
+  line-height: 1.2;
+}
+
+/* Messages panel */
+.messages {
+  display: flex;
+  flex-direction: column;
+  width: 320px;
+  flex: none;
+  padding: 4px;
+  background: var(--surface);
+  border-left: 1px solid var(--line);
+  overflow-y: auto;
+}
+.messages-list {
+  margin-top: auto;
+}
+.message {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: 6px 8px;
+  text-align: left;
+}
+.message-line {
+  display: flex;
+  gap: 8px;
+  font-size: var(--text-label-lg);
+}
+.message-preview {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+  font-size: var(--text-label-lg);
+}
+.messages-empty {
+  margin: auto 8px;
+  color: var(--faint);
+}
+
+/* Status bar */
+.statusbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 4px;
+  background: var(--surface);
+  border-top: 1px solid var(--line);
+  white-space: nowrap;
+  overflow: hidden;
+}
+.status-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 20px;
+  padding: 0 6px;
+  color: var(--muted);
+  font-size: var(--text-label);
+}
+.status-item.warn {
+  color: var(--warn);
+}
+
+/* Empty state, UI-UX §4.7 */
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  flex: 1;
+  padding: 24px;
+  text-align: center;
+}
+.empty-title {
+  margin: 0;
+  font-size: 20px;
+  line-height: 28px;
+  font-weight: 600;
+}
+.empty-choices {
+  display: flex;
+  gap: 12px;
+}
+.empty-choice {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  width: 148px;
+  padding: 16px 12px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  font-size: var(--text-label-lg);
+}
+.empty-choice:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+.empty-choice:disabled {
+  cursor: default;
+  color: var(--muted);
+}
+.empty-choice-name {
+  color: var(--fg);
+  font-size: var(--text-ui);
+  font-weight: 600;
+}
+.empty-choice:disabled .empty-choice-name {
+  color: var(--muted);
+}
+.empty-text {
+  margin: 0;
+  color: var(--muted);
+}

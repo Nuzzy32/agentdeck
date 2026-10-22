@@ -18,6 +18,7 @@ Terakhir diperbarui: 2026-10-22. Baca ini dulu saat melanjutkan, lalu `docs/IMPL
 | T1.1 | Kerangka Tauri 2 + React + TS, semua cek lulus, jendela terbuka | commit `db8e27d` |
 | S6 throughput | Lulus dengan flow control (jendela kredit 256 KB, ack kumulatif) | D-018, `spikes/s6-throughput/` |
 | T0.7 | Tinjauan docs (44 temuan) diterapkan; sisa yang belum terbukti di ARCHITECTURE §12 | D-019 |
+| T1.2 | Token desain + layout statis (title bar, sidebar, pane, panel Pesan, status bar, keadaan awal) dengan data contoh | `src/styles/tokens.css`, `src/layout/`; title bar native masih tampil sampai `titleBarStyle: Overlay` dipasang di `tauri.conf.json` |
 
 ## S6 throughput: selesai (D-018)
 Lulus dengan flow control: jendela kredit 256 KB di Rust + `pane_ack` kumulatif dari callback `term.write` (microtask),
@@ -25,7 +26,7 @@ perintah `async`. Sumber referensi: `spikes/s6-throughput/`. Branch `spike/s6` m
 tidak di-merge); boleh dihapus dengan `git branch -D spike/s6`.
 
 ## Berikutnya
-- T1.2: token desain (`src/styles/tokens.css`) + layout statis dari prototipe (D-015, UI-UX §2, §4.7, §6).
+- T1.3: `PaneManager` PTY + Channel dengan flow control (D-018).
 
 ## Keputusan tertunda (pemilik)
 - D-019: apakah kunci API (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`) boleh diteruskan ke agen lewat daftar izin.
