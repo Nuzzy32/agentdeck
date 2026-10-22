@@ -1,12 +1,16 @@
 //! Message delivery (ARCHITECTURE §5.1–5.3, MCP-TOOLS `pane_send`): sanitising, the sender marker, the paste shape,
 //! a FIFO queue per target pane, and the readiness rule. Pure logic: time is passed in, PTY writes are returned as
-//! actions, so tests use a fake clock. Wiring to PTY, screen, and the `pane_send` tool is T2.7.
+//! actions, so tests use a fake clock. [`Engine`] at the bottom wires it to the registry, the PTYs, the log and the UI.
 
 use std::collections::{HashMap, VecDeque};
 use std::fmt;
-use std::time::{Duration, Instant};
+use std::sync::Arc;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use crate::panes::{self, GuardInfo, Panes, Record, Step};
 use crate::policy::{LoopGuard, QUEUE_PER_TARGET, SEND_MAX_BYTES};
+use crate::pty::PaneManager;
+use crate::store::{self, Audit, Store};
 
 /// Sender marker limit (ARCHITECTURE §5.3).
 pub const MARKER_MAX_BYTES: usize = 256;
@@ -152,12 +156,7 @@ pub enum PaneStatus {
 }
 
 /// What `vt100` says about the agent's input box (§5.2 item 4).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum InputState {
-    Empty,
-    HasText,
-    Unknown,
-}
+pub use crate::screen::InputState;
 
 /// Snapshot of the target pane, gathered by the caller from PTY, screen, and status tracker.
 #[derive(Clone, Copy, Debug)]
@@ -188,6 +187,8 @@ pub enum DropReason {
     NoBracketedPaste,
     /// The person chose "Hentikan" on the loop-guard card.
     Stopped,
+    /// The person chose "Buang" in the Messages panel.
+    Discarded,
 }
 
 impl DropReason {
@@ -196,6 +197,7 @@ impl DropReason {
             Self::TargetExited => "target agent exited",
             Self::NoBracketedPaste => "target terminal has bracketed paste off",
             Self::Stopped => "stopped by the person at the loop guard",
+            Self::Discarded => "discarded by the person",
         }
     }
 }
@@ -364,6 +366,15 @@ impl Delivery {
         }
     }
 
+    /// Takes one waiting message out ("Buang"). Returns its target, `None` when it already left the queue.
+    pub fn remove(&mut self, id: &str) -> Option<String> {
+        self.queues.iter_mut().find_map(|(to, q)| {
+            let i = q.items.iter().position(|m| m.id == id)?;
+            q.items.remove(i);
+            Some(to.clone())
+        })
+    }
+
     /// Target exited or the person chose "Hentikan": every waiting message becomes `dropped`.
     pub fn drop_all(&mut self, to: &str, why: DropReason) -> Poll {
         let ids: Vec<_> = self
@@ -376,6 +387,212 @@ impl Delivery {
         } else {
             Poll::Dropped(ids)
         }
+    }
+}
+
+// ---- Engine: the wiring (T2.7) ----
+
+/// Poll interval of a waiting delivery worker.
+const TICK: Duration = Duration::from_millis(100);
+
+/// What the UI is told (Tauri events `agentdeck://messages-changed` and `agentdeck://loop-guard`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Notice {
+    Messages { workspace: String },
+    LoopGuard(GuardInfo),
+}
+
+pub type Notify = Arc<dyn Fn(Notice) + Send + Sync>;
+
+/// Registry + PTYs + message log + UI events. Cheap to clone; one per app, shared by the MCP server, the delivery
+/// workers (one thread per target with waiting messages) and the Tauri commands.
+#[derive(Clone)]
+pub struct Engine {
+    pub panes: Panes,
+    pub pm: PaneManager,
+    store: Option<Arc<Store>>,
+    notify: Notify,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum Tick {
+    Empty,
+    Wait,
+    Progress,
+    Delivered(String),
+}
+
+fn epoch_ms(t: SystemTime) -> u64 {
+    t.duration_since(UNIX_EPOCH)
+        .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
+}
+
+impl Engine {
+    pub fn new(panes: Panes, pm: PaneManager, store: Option<Store>, notify: Notify) -> Self {
+        Self {
+            panes,
+            pm,
+            store: store.map(Arc::new),
+            notify,
+        }
+    }
+
+    /// `pane_send`: enqueue, then one delivery attempt right away so an idle target reports `delivered`.
+    /// Blocks up to the Enter delay; call off the async runtime.
+    pub fn send(
+        &self,
+        caller: &str,
+        to: &str,
+        text: &str,
+    ) -> Result<(String, &'static str), String> {
+        let sent = panes::lock(&self.panes).send(caller, to, text, epoch_ms(SystemTime::now()))?;
+        let id = sent.record.id.clone();
+        let target = sent.record.to.clone();
+        let mut state = sent.record.state.as_str();
+        self.publish(vec![sent.record], None);
+        if sent.start_worker {
+            if self.tick(&target) == Tick::Delivered(id.clone()) {
+                state = State::Delivered.as_str();
+            }
+            self.spawn_worker(target);
+        }
+        Ok((id, state))
+    }
+
+    fn spawn_worker(&self, to: String) {
+        let me = self.clone();
+        let name = format!("deliver-{to}");
+        let worker = to.clone();
+        let started = std::thread::Builder::new().name(name).spawn(move || {
+            loop {
+                match me.tick(&worker) {
+                    Tick::Empty if panes::lock(&me.panes).worker_done(&worker) => break,
+                    Tick::Wait => std::thread::sleep(TICK),
+                    _ => {}
+                }
+            }
+        });
+        if started.is_err() {
+            // Next `send` to this target tries again.
+            panes::lock(&self.panes).worker_done(&to);
+        }
+    }
+
+    /// One step for target `to`. The registry lock is not held while the paste is written.
+    fn tick(&self, to: &str) -> Tick {
+        let pm = &self.pm;
+        let step = panes::lock(&self.panes).poll(
+            to,
+            |pty| pm.typed_at(pty).ok().flatten(),
+            Instant::now(),
+        );
+        match step {
+            Step::Empty => Tick::Empty,
+            Step::Wait => Tick::Wait,
+            Step::Dropped(changed) => {
+                self.publish(changed, None);
+                Tick::Progress
+            }
+            Step::Deliver {
+                id,
+                pty,
+                actions,
+                mut changed,
+                guard,
+                paused_now,
+            } => {
+                let written = actions.iter().all(|a| match a {
+                    Action::Write(bytes) => self.pm.write(pty, bytes, false).is_ok(),
+                    Action::Sleep(t) => {
+                        std::thread::sleep(*t);
+                        true
+                    }
+                });
+                if !written {
+                    changed.extend(panes::lock(&self.panes).undeliverable(&id));
+                }
+                if paused_now && let Some(store) = &self.store {
+                    let audit = Audit::LoopPaused { count: guard.count };
+                    if let Err(e) = store.log_audit(SystemTime::now(), &guard.workspace, &audit) {
+                        eprintln!("agentdeck: audit log not written: {e}");
+                    }
+                }
+                self.publish(changed, Some(guard));
+                if written {
+                    Tick::Delivered(id)
+                } else {
+                    Tick::Progress
+                }
+            }
+        }
+    }
+
+    /// Logs each state change and tells the UI which workspaces changed. Never logs a token: records carry none,
+    /// and `Store` scrubs token-shaped text.
+    fn publish(&self, changed: Vec<Record>, guard: Option<GuardInfo>) {
+        let now = SystemTime::now();
+        let mut workspaces: Vec<&str> = Vec::new();
+        for r in &changed {
+            if let Some(store) = &self.store {
+                let m = store::Msg {
+                    workspace: &r.workspace,
+                    from: &r.from,
+                    to: &r.to,
+                    id: &r.id,
+                    state: r.state,
+                    text: &r.text,
+                };
+                if let Err(e) = store.log_message(now, &m) {
+                    eprintln!("agentdeck: message log not written: {e}");
+                }
+            }
+            if !workspaces.contains(&r.workspace.as_str()) {
+                workspaces.push(&r.workspace);
+            }
+        }
+        for ws in workspaces {
+            (self.notify)(Notice::Messages {
+                workspace: ws.to_owned(),
+            });
+        }
+        if let Some(g) = guard {
+            (self.notify)(Notice::LoopGuard(g));
+        }
+    }
+
+    fn released(&self, r: Option<(GuardInfo, Vec<Record>)>) -> Option<GuardInfo> {
+        let (g, changed) = r?;
+        self.publish(changed, Some(g.clone()));
+        Some(g)
+    }
+
+    /// `pane_write` with `typed` and a `\r`: the person pressed Enter (§5.5).
+    pub fn human_enter(&self, pty: u32) {
+        let r = panes::lock(&self.panes).human_enter(pty);
+        self.released(r);
+    }
+
+    /// "Lanjutkan". `None` for an unknown workspace.
+    pub fn guard_continue(&self, ws: u32) -> Option<GuardInfo> {
+        let r = panes::lock(&self.panes).guard_continue(ws);
+        match r {
+            None => panes::lock(&self.panes).guard(ws),
+            some => self.released(some),
+        }
+    }
+
+    /// "Hentikan". `None` for an unknown workspace.
+    pub fn guard_stop(&self, ws: u32) -> Option<GuardInfo> {
+        let r = panes::lock(&self.panes).guard_stop(ws);
+        self.released(r)
+    }
+
+    /// "Buang". False when the message no longer waits.
+    pub fn discard(&self, id: &str) -> bool {
+        let r = panes::lock(&self.panes).discard(id);
+        let found = r.is_some();
+        self.publish(r.into_iter().collect(), None);
+        found
     }
 }
 

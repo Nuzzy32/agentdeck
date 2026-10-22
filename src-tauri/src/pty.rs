@@ -184,10 +184,11 @@ pub(crate) struct Pane {
     screen: Option<Arc<Mutex<Screen>>>,
 }
 
-#[derive(Default)]
+/// Cheap to clone: clones share the same panes (the delivery engine keeps one).
+#[derive(Default, Clone)]
 pub struct PaneManager {
-    panes: Mutex<HashMap<u32, Arc<Pane>>>,
-    next: AtomicU32,
+    panes: Arc<Mutex<HashMap<u32, Arc<Pane>>>>,
+    next: Arc<AtomicU32>,
 }
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -347,9 +348,8 @@ impl PaneManager {
         w.write_all(data).and_then(|_| w.flush()).map_err(err)
     }
 
-    /// When the person last typed in the pane; Delivery's readiness check (`typing_ms`, T2.7) reads it.
-    #[allow(dead_code)]
-    fn typed_at(&self, id: u32) -> Result<Option<Instant>, String> {
+    /// When the person last typed in the pane; Delivery's readiness check (`typing_ms`) reads it.
+    pub fn typed_at(&self, id: u32) -> Result<Option<Instant>, String> {
         Ok(*lock(&self.get(id)?.typed_at))
     }
 
@@ -459,11 +459,17 @@ pub async fn pane_detach(panes: State<'_, PaneManager>, id: u32) -> Result<(), S
 #[tauri::command]
 pub async fn pane_write(
     panes: State<'_, PaneManager>,
+    engine: State<'_, crate::delivery::Engine>,
     id: u32,
     data: String,
     typed: bool,
 ) -> Result<(), String> {
-    panes.write(id, data.as_bytes(), typed)
+    panes.write(id, data.as_bytes(), typed)?;
+    // Enter from the person (not an xterm.js reply) starts the loop guard over (ARCHITECTURE §5.5).
+    if typed && data.contains('\r') {
+        engine.human_enter(id);
+    }
+    Ok(())
 }
 
 #[tauri::command]
