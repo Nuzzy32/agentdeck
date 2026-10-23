@@ -63,7 +63,8 @@ impl Screen {
     }
 
     /// The last `lines` rows of scrollback + screen as plain text, trailing blank rows dropped. The alternate screen
-    /// has no scrollback, so there it returns at most the screen height.
+    /// has no scrollback, so there it returns at most the screen height. On the input row (see [`Screen::prompt_row`])
+    /// dim cells are left out: they are Claude's suggestion or Codex's placeholder, not typed text.
     pub fn read(&mut self, lines: usize) -> String {
         let s = self.parser.screen_mut();
         let (rows, cols) = s.size();
@@ -78,7 +79,19 @@ impl Screen {
             top -= take;
         }
         s.set_scrollback(0);
+        let live = out.len();
         out.extend(s.rows(0, cols.get()));
+        if let Some(row) = prompt_row(s) {
+            out[live + usize::from(row)] = (0..cols.get())
+                .filter_map(|c| s.cell(row, c))
+                .map(|c| match c.contents() {
+                    _ if c.is_wide_continuation() => "",
+                    _ if c.dim() => " ",
+                    "" => " ",
+                    t => t,
+                })
+                .collect();
+        }
         while out.last().is_some_and(|l| l.trim().is_empty()) {
             out.pop();
         }
@@ -129,6 +142,14 @@ impl Screen {
             InputState::Empty
         }
     }
+}
+
+/// The cursor row when it starts with a non-dim, non-inverse prompt glyph (`❯` Claude Code, `›` Codex), as in
+/// [`Screen::input_state`]. Dim `›` is Codex history and inverse `›` a selected card option, so those are not it.
+fn prompt_row(s: &vt100::Screen) -> Option<u16> {
+    let (row, _) = s.cursor_position();
+    let first = s.cell(row, 0)?;
+    (matches!(first.contents(), "❯" | "›") && !first.dim() && !first.inverse()).then_some(row)
 }
 
 #[cfg(test)]
@@ -305,6 +326,29 @@ mod tests {
         let s = codex(b"\x1b[6;3H\x1b[22m\x1b[2m\x1b[2mAsk Codex to do anything\x1b[22m\x1b[6;3H");
         assert_eq!(s.input_state("codex"), InputState::Empty);
         assert_eq!(codex(b"\x1b[6;3H").input_state("codex"), InputState::Empty);
+    }
+
+    #[test]
+    fn read_drops_dim_suggestion_on_prompt_row_only() {
+        // (a) Suggestion alone: the prompt row reads as just the glyph; dim status line elsewhere stays.
+        let mut s =
+            claude(b"\x1b[?25l\x1b[5;3H\x1b[2mTry \"fix lint errors\"\x1b[22m\x1b[5;3H\x1b[?25h");
+        let text = s.read(10);
+        assert!(!text.contains("fix lint"), "{text}");
+        assert!(text.lines().any(|l| l == "❯"), "{text}");
+        assert!(text.ends_with("ctx 53k/1.0M 5%"), "{text}");
+        // (b) Typed text before the suggestion is kept, the dim tail dropped.
+        let mut s = claude(b"\x1b[5;3Hfix\x1b[2m the bug\x1b[22m\x1b[5;6H");
+        assert!(s.read(10).lines().any(|l| l == "❯\u{a0}fix"));
+        // (c) Dim text on other rows is kept, including a dim `›` history row and when the cursor is elsewhere.
+        let mut s = codex(b"\x1b[6;3H\x1b[2mAsk Codex to do anything\x1b[22m\x1b[6;3H");
+        let text = s.read(10);
+        assert!(
+            text.contains("› old prompt") && !text.contains("Ask Codex"),
+            "{text}"
+        );
+        let mut s = claude(b"\x1b[5;3H\x1b[2mdim\x1b[22m\x1b[2;1H");
+        assert!(s.read(10).contains("❯\u{a0}dim"));
     }
 
     #[test]

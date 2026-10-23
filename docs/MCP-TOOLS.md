@@ -143,7 +143,9 @@ menahan antrean; pesan tetap tersimpan sampai orang memutuskan.
 ---
 
 ## `pane_read` (P0)
-Membaca teks layar pane lain (dari emulator headless, tanpa warna).
+Membaca teks layar pane lain (dari emulator headless, tanpa warna). Pada baris input agen (baris kursor yang diawali
+`❯` atau `›` tidak samar) sel samar dibuang: itu saran Claude atau placeholder Codex, bukan teks yang diketik. Teks
+samar di baris lain tetap terbaca.
 
 **Argumen:**
 | Nama | Tipe | Wajib | Aturan |
