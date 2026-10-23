@@ -3,11 +3,13 @@
 
 use std::ffi::OsString;
 use std::fmt;
+use std::path::Path;
 
 use serde::Serialize;
 
 use crate::catalogue::{self, Catalogue, StatusSource};
 use crate::tokens::Token;
+use crate::usage;
 
 /// Satu-satunya variabel yang diambil dari environment agentdeck (D-014, D-019). `PATH` datang dari shell login.
 pub const INHERIT: [&str; 7] = [
@@ -49,6 +51,8 @@ pub struct Mcp<'a> {
     pub url: &'a str,
     pub token: &'a Token,
     pub pane: &'a str,
+    /// Berkas statusline pane ini ([`crate::usage`]); `None` tanpa direktori data.
+    pub statusline: Option<&'a Path>,
 }
 
 /// Galat untuk UI (UI-UX §5): `message` siap tampil, `install` perintah pasang yang bisa disalin.
@@ -132,6 +136,9 @@ pub fn agent(
         env.push(("AGENTDECK_MCP_URL".into(), m.url.into()));
         env.push(("AGENTDECK_TOKEN".into(), m.token.expose().into()));
         env.push(("AGENTDECK_PANE_ID".into(), m.pane.into()));
+        if let Some(p) = m.statusline {
+            env.push((usage::ENV.into(), p.into()));
+        }
     }
     Ok(Launch {
         argv,
@@ -253,6 +260,7 @@ mod tests {
                 url,
                 token: &token,
                 pane: "p7",
+                statusline: Some(Path::new("/data/statusline/p7.json")),
             })
         };
         let big = format!("-{}", "x".repeat(16 * 1024 - 1));
@@ -264,6 +272,8 @@ mod tests {
                 r#"{"mcpServers":{"agentdeck":{"type":"http","url":"${AGENTDECK_MCP_URL}","headers":{"Authorization":"Bearer ${AGENTDECK_TOKEN}"},"timeout":330000}}}"#,
                 "--allowedTools",
                 "mcp__agentdeck",
+                "--settings",
+                r#"{"statusLine":{"type":"command","command":"cat > \"$AGENTDECK_STATUSLINE\""}}"#,
                 "--",
                 big.as_str(),
             ]
@@ -288,11 +298,15 @@ mod tests {
             assert_eq!(value(&l.env, "AGENTDECK_MCP_URL"), Some(url));
             assert_eq!(value(&l.env, "AGENTDECK_TOKEN"), Some(token.expose()));
             assert_eq!(value(&l.env, "AGENTDECK_PANE_ID"), Some("p7"));
+            assert_eq!(
+                value(&l.env, "AGENTDECK_STATUSLINE"),
+                Some("/data/statusline/p7.json")
+            );
             assert!(!l.argv.iter().any(|a| a.contains(token.expose())));
             assert!(!format!("{l:?}").contains(token.expose()));
             // Still from scratch: nothing of agentdeck's own besides the allow-list and AGENTDECK_*.
             assert!(!l.env.iter().any(|(_, v)| v == "sk-secret"));
-            assert_eq!(l.env.len(), 13);
+            assert_eq!(l.env.len(), 14);
         }
     }
 
@@ -339,6 +353,7 @@ mod tests {
             url: "http://127.0.0.1:1/mcp",
             token: &token,
             pane: "p1",
+            statusline: Some(Path::new("/data/statusline/p1.json")),
         };
         let path = dir.display().to_string();
         let l = agent(&cat, "gemini", Some("x"), env(polluted, &path), Some(mcp)).unwrap();

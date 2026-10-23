@@ -430,3 +430,23 @@ halaman merek OpenAI menjawab 403 (hanya terbaca lewat cuplikan pencarian, belum
   (core lebih baru) tidak ditampilkan mentah.
 - Uji di aplikasi (`cargo run` + vite, dua pane Claude Code 2.1.309, saling kirim aktif): draf di input p2, p1 memanggil
   `pane_send` → chip p2 "1 pesan · kosongkan input"; draf dihapus → pesan terkirim, chip hilang.
+
+## D-029 — Kuota dan konteks Claude dari statusline resmi (2026-10-23)
+- Ide dari riset MXterm Pro (RESEARCH §2): statusline Claude Code memberi `rate_limits.five_hour/seven_day`
+  (`used_percentage`, `resets_at`), `context_window.used_percentage`, dan `session_id` lewat stdin perintah
+  `statusLine`. Fitur resmi; tidak ada kredensial yang dibaca (D-006 tetap). Terlihat di Claude Code 2.1.309 setelah
+  giliran pertama; sebelum itu `rate_limits` tidak ada dan persen konteks `null`.
+- Injeksi per peluncuran (D-005): `mcp_args` Claude menambah `--settings
+  {"statusLine":{"type":"command","command":"cat > \"$AGENTDECK_STATUSLINE\""}}`; env `AGENTDECK_STATUSLINE` berisi
+  `<data>/statusline/<pane>.json`. MXterm memasangnya di `~/.claude/settings.json`; kita tidak (aturan 3).
+  Konsekuensi: di pane agentdeck statusline milik pengguna diganti (bukan dihapus dari berkasnya), baris statusline
+  Claude kosong.
+- `usage.rs`: berkas ditulis proses agen, jadi tidak dipercaya. Dibaca ≤ 64 KB, hanya tiga kolom, persen dijepit
+  0–100, `session_id` hanya bila berbentuk UUID dan tidak dikirim ke UI (dipakai untuk melanjutkan percakapan).
+  Direktori dikosongkan saat start, berkas pane dihapus saat pane dijalankan (ulang).
+- UI memanggil `pane_usage` tiap 10 s untuk pane Claude yang berjalan di workspace yang tampil; badge header
+  `5j 31% · ktx 5%`, tooltip kuota 7 hari + waktu reset, amber mulai 80%. Codex tidak: kuotanya hanya dari kredensial.
+- Belum: menolak `pane_spawn` di atas ambang kuota (MXterm 85%).
+- Uji: `cargo test` (`usage::tests` dengan JSON 2.1.309 nyata), argumen dari `catalogue.toml` dijalankan ke Claude
+  2.1.309 asli dengan path berspasi → berkas terisi kuota, konteks, `session_id`. Badge belum dilihat di aplikasi:
+  jendela dev ada di Space lain dan tidak bisa dijadikan frontmost.

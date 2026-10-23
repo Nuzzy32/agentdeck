@@ -2,7 +2,7 @@ import { type ReactNode, useState } from "react";
 import { TerminalPane } from "../pane/TerminalPane";
 import { Icon, IconButton } from "./Icon";
 import { splitMiddle } from "./logic";
-import { type Pane, type Report, reportBadge, statusLabel } from "./model";
+import { type Pane, type Report, reportBadge, statusLabel, type Usage, usageBadge } from "./model";
 
 /** A child's last `pane_report` (T4.2); the label says the outcome in words, colour only repeats it. */
 function ReportBadge({ report }: { report: Report }) {
@@ -10,6 +10,17 @@ function ReportBadge({ report }: { report: Report }) {
   return (
     <span className={`badge pane-report pane-report-${report.status}`} title={title}>
       {label}
+    </span>
+  );
+}
+
+/** Quota and context from Claude's statusline (D-029); amber from `USAGE_WARN`, the text says the numbers anyway. */
+function UsageBadge({ usage }: { usage: Usage }) {
+  const b = usageBadge(usage);
+  if (!b) return null;
+  return (
+    <span className={`badge mono pane-usage${b.warn ? " pane-usage-warn" : ""}`} title={b.title}>
+      {b.label}
     </span>
   );
 }
@@ -107,6 +118,7 @@ export function PaneView({
         <span className="pane-spacer" />
         {pane.parent ? <span className="badge pane-relation">anak {pane.parent}</span> : null}
         {pane.report ? <ReportBadge report={pane.report} /> : null}
+        {pane.usage ? <UsageBadge usage={pane.usage} /> : null}
         {pane.pending > 0 ? (
           <span
             className="badge chip"

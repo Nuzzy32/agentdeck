@@ -11,6 +11,7 @@ import {
   STARTING_MS,
   statusLabel,
   tildePath,
+  usageBadge,
 } from "./model";
 
 const agent: Pane = {
@@ -114,5 +115,21 @@ describe("reportBadge", () => {
     expect(title).toContain("Fixed auth.");
     expect(title).toContain("Berkas: a.rs, b.rs");
     expect(reportBadge(r).title).not.toContain("Berkas");
+  });
+});
+
+describe("usageBadge", () => {
+  it("shows the 5-hour window and context, amber from 80%", () => {
+    const u = { five_hour: { used: 31, resets_at: 1792766400 }, seven_day: { used: 15, resets_at: 0 }, context: 5 };
+    const b = usageBadge(u);
+    expect(b?.label).toBe("5j 31% · ktx 5%");
+    expect(b?.warn).toBe(false);
+    expect(b?.title).toContain("Kuota 7 hari: 15% terpakai");
+    expect(b?.title).not.toContain("15% terpakai (reset");
+    expect(usageBadge({ ...u, seven_day: { used: 80, resets_at: 0 } })?.warn).toBe(true);
+  });
+
+  it("hides before the first turn", () => {
+    expect(usageBadge({ five_hour: null, seven_day: null, context: null })).toBeNull();
   });
 });

@@ -31,6 +31,10 @@ mcp_args = [
   '{"mcpServers":{"agentdeck":{"type":"http","url":"${AGENTDECK_MCP_URL}","headers":{"Authorization":"Bearer ${AGENTDECK_TOKEN}"},"timeout":330000}}}',
   "--allowedTools",
   "mcp__agentdeck",
+  # Statusline resmi Claude → kuota dan konteks di header pane (D-029). Menggantikan statusLine pengguna hanya di pane
+  # agentdeck; config global tidak disentuh.
+  "--settings",
+  '{"statusLine":{"type":"command","command":"cat > \"$AGENTDECK_STATUSLINE\""}}',
 ]
 task_args = ["--", "{task}"]
 login_status = "claude_auth_status"

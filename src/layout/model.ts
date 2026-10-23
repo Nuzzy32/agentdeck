@@ -57,6 +57,8 @@ export type Pane = {
   /** From `layout.json` (T4.3): never run in this app run; shown as exited with "belum dijalankan". */
   restored?: boolean;
   report?: Report;
+  /** Claude panes only, polled while the workspace is shown. */
+  usage?: Usage;
   pending: number;
   /** Why those messages are not pasted yet ("kamu sedang mengetik"); absent when the core gave no reason. */
   pendingWhy?: string;
@@ -116,6 +118,35 @@ export function reportBadge(r: Report): { label: string; title: string } {
     label: `hasil: ${REPORT_LABEL[r.status]}${tests ? ` · ${tests}` : ""}`,
     title: `Laporan ${time}\n${r.summary}${files}`,
   };
+}
+
+/** `pane_usage` (D-029): Claude's own statusline numbers. `resets_at` in seconds since the epoch. */
+export type UsageWindow = { used: number; resets_at: number };
+export type Usage = { five_hour: UsageWindow | null; seven_day: UsageWindow | null; context: number | null };
+
+/** From this share of the 5-hour window on the badge turns amber. */
+export const USAGE_WARN = 80;
+
+/** Header badge `5j 31% · ktx 5%`; `null` when there is nothing to show yet (before the first turn). */
+export function usageBadge(u: Usage): { label: string; title: string; warn: boolean } | null {
+  const at = (w: UsageWindow) =>
+    w.resets_at
+      ? ` (reset ${new Date(w.resets_at * 1000).toLocaleString("id-ID", { weekday: "short", hour: "2-digit", minute: "2-digit" })})`
+      : "";
+  const parts: string[] = [];
+  const lines: string[] = [];
+  if (u.five_hour) {
+    parts.push(`5j ${u.five_hour.used}%`);
+    lines.push(`Kuota 5 jam: ${u.five_hour.used}% terpakai${at(u.five_hour)}`);
+  }
+  if (u.seven_day) lines.push(`Kuota 7 hari: ${u.seven_day.used}% terpakai${at(u.seven_day)}`);
+  if (u.context !== null) {
+    parts.push(`ktx ${u.context}%`);
+    lines.push(`Konteks: ${u.context}% terpakai`);
+  }
+  if (!parts.length) return null;
+  const warn = (u.five_hour?.used ?? 0) >= USAGE_WARN || (u.seven_day?.used ?? 0) >= USAGE_WARN;
+  return { label: parts.join(" · "), title: `${lines.join("\n")}\nDari statusline Claude Code.`, warn };
 }
 
 /** An agent with no official report yet stays `starting` this long before the output heuristic applies. */

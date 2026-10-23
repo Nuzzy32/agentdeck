@@ -19,6 +19,7 @@ import {
   pushRecent,
   STARTING_MS,
   tildePath,
+  type Usage,
   type Workspace,
 } from "./layout/model";
 import { PaneView } from "./layout/Pane";
@@ -88,6 +89,8 @@ function saveRecents(list: string[]) {
 
 /** Quiet time before a layout change is written to `layout.json`. */
 const SAVE_MS = 400;
+/** Claude rewrites its statusline after each turn; a few seconds late is fine for a quota badge. */
+const USAGE_POLL_MS = 10_000;
 
 let restoring: Promise<[Layout | null, string | null]> | null = null;
 /** `layout_restore` hands the layout over once per run, so both StrictMode effects share one call. */
@@ -181,7 +184,32 @@ function App() {
   const shared = useSyncExternalStore(collab.subscribe, () => (wsKey === null ? EMPTY : collab.get(wsKey)));
   const pending = pendingByPane(shared.messages);
   const why = waitByPane(shared.messages);
-  const withPending = (p: Pane): Pane => ({ ...p, pending: pending[p.id] ?? 0, pendingWhy: why[p.id] });
+
+  // D-029: quota and context of the shown workspace's running Claude panes. Own state, so polling never touches the
+  // layout that `layout_save` writes.
+  const [usage, setUsage] = useState<Record<string, Usage>>({});
+  const shownWs = workspaces.find((w) => w.id === activeId);
+  const claudeIds = (shownWs ? leaves(shownWs.tree) : [])
+    .filter((id) => panes[id]?.agentId === "claude-code" && panes[id]?.ptyId !== null)
+    .join(",");
+  useEffect(() => {
+    if (!claudeIds) return;
+    const poll = () =>
+      invoke<Record<string, Usage>>("pane_usage", { panes: claudeIds.split(",") }).then(
+        (u) => setUsage((all) => ({ ...all, ...u })),
+        (e: unknown) => console.error("pane_usage", e),
+      );
+    void poll();
+    const t = setInterval(() => void poll(), USAGE_POLL_MS);
+    return () => clearInterval(t);
+  }, [claudeIds]);
+
+  const withPending = (p: Pane): Pane => ({
+    ...p,
+    pending: pending[p.id] ?? 0,
+    pendingWhy: why[p.id],
+    usage: usage[p.id],
+  });
 
   const toast = (text: string) => {
     const id = ids.current.toast++;

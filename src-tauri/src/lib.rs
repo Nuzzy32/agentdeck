@@ -13,6 +13,7 @@ pub mod spawn;
 pub mod status;
 pub mod store;
 pub mod tokens;
+pub mod usage;
 pub mod worktree;
 
 /// The launcher's agent list (T1.6): installed or not, version, install command. Off the async runtime, since
@@ -155,6 +156,15 @@ async fn pane_report_last(
     pane: String,
 ) -> Result<Option<mcp::report::Report>, String> {
     Ok(panes::lock(&engine.panes).report(&pane))
+}
+
+/// Quota and context of each pane that has a statusline reading yet (D-029); panes without one are left out.
+#[tauri::command]
+async fn pane_usage(panes: Vec<String>) -> std::collections::HashMap<String, usage::Usage> {
+    panes
+        .into_iter()
+        .filter_map(|p| usage::read(&p).map(|u| (p, u)))
+        .collect()
 }
 
 #[tauri::command]
@@ -367,6 +377,7 @@ pub fn run() -> tauri::Result<()> {
             let store = match data_dir {
                 Ok(dir) => {
                     catalogue::set_data_dir(dir.clone());
+                    usage::init(&dir);
                     let store = store::Store::new(&dir);
                     if let Err(e) = store.prune(std::time::SystemTime::now()) {
                         eprintln!("agentdeck: old logs not pruned: {e}");
@@ -439,6 +450,7 @@ pub fn run() -> tauri::Result<()> {
             workspace_set_peer,
             workspace_get_peer,
             pane_report_last,
+            pane_usage,
             approval_answer,
             approvals_pending,
             #[cfg(debug_assertions)]

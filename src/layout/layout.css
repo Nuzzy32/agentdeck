@@ -394,6 +394,10 @@
   border-color: var(--warn);
   color: var(--warn);
 }
+.pane-usage-warn {
+  border-color: var(--warn);
+  color: var(--warn);
+}
 
 /* ponytail: width thresholds approximate "title already elided"; measure text if the order ever looks wrong. */
 @container pane-header (max-width: 520px) {
@@ -404,7 +408,8 @@
 @container pane-header (max-width: 420px) {
   .pane-status-label,
   .pane-relation,
-  .pane-report {
+  .pane-report,
+  .pane-usage {
     display: none;
   }
 }

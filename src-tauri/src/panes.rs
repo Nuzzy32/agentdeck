@@ -30,6 +30,7 @@ use crate::pty::{self, OnEvent, PaneEvent, PaneManager};
 use crate::screen::Screen;
 use crate::store::Audit;
 use crate::tokens::{Token, TokenRegistry};
+use crate::usage;
 use crate::worktree::{self, Worktree};
 
 /// Same as the WebView's `STARTING_MS`: an agent that has not reported by then is `unknown`.
@@ -978,10 +979,13 @@ pub fn start(
         None => launch::shell(env),
         Some(agent) => {
             let cat = Catalogue::builtin().map_err(|e| fail(LaunchError::new(e.to_string())))?;
+            usage::clear(&id);
+            let statusline = usage::path(&id);
             let mcp = mcp_url.zip(opened.token.as_ref()).map(|(url, token)| Mcp {
                 url,
                 token,
                 pane: &id,
+                statusline: statusline.as_deref(),
             });
             launch::agent(&cat, agent, spec.task.as_deref(), env, mcp).map_err(fail)?
         }
