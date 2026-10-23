@@ -1,39 +1,145 @@
-# agentdeck
+<p align="center">
+  <img src="src-tauri/icons/source.png" alt="Ikon agentdeck" width="128" />
+</p>
 
-Terminal desktop untuk menjalankan Claude Code, Codex, dan agen CLI lain berdampingan, dan membuat mereka saling
-melempar prompt: satu agen membuka agen lain, memberi tugas, membaca layarnya, dan menerima hasilnya. Setiap agen
-adalah CLI resmi dengan login milikmu; agentdeck hanya menyediakan terminal dan jembatan MCP lokal.
+<h1 align="center">agentdeck</h1>
 
-**Status:** Phase 0–4 selesai (MVP + kerja paralel). Distribusi pribadi saja untuk sekarang; rilis publik ditunda
-(DECISIONS D-026). Titik lanjut: [docs/PROGRESS.md](docs/PROGRESS.md).
+<p align="center">
+  Workspace terminal lokal untuk menjalankan dan mengoordinasikan coding agent dari satu jendela.
+</p>
 
-agentdeck tidak berafiliasi dengan, atau didukung oleh, Anthropic maupun OpenAI. Kamu memasang dan login sendiri ke
-Claude Code dan Codex CLI; pemakaiannya tunduk pada ketentuan masing-masing provider. Agen yang saling memberi tugas
-memakai kuota paketmu sendiri, dan untuk otomasi berat provider menganjurkan kunci API.
+<p align="center">
+  <strong>Claude Code · Codex · PTY · MCP lokal · Tauri</strong>
+</p>
 
-## Dokumen
-| Berkas | Isi |
-|---|---|
-| [docs/PRD.md](docs/PRD.md) | Apa yang dibangun, prioritas, alur, roadmap |
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Cara kerja: komponen, peluncuran agen, pengiriman pesan, status, keamanan |
-| [docs/MCP-TOOLS.md](docs/MCP-TOOLS.md) | Kontrak tool MCP yang dipakai agen |
-| [docs/UI-UX.md](docs/UI-UX.md) | Layar, interaksi, pintasan, keadaan galat, token desain |
-| [docs/IMPLEMENTATION-PLAN.md](docs/IMPLEMENTATION-PLAN.md) | Task per phase, urutan, kriteria selesai |
-| [docs/PHASE-0.md](docs/PHASE-0.md) | Panduan spike kelayakan S1–S8 + `spikes/pty_probe.py` |
-| [docs/SETUP.md](docs/SETUP.md) | Pasang alat, buat proyek Tauri, perintah harian |
-| [docs/DECISIONS.md](docs/DECISIONS.md) | Log keputusan arsitektur |
-| [docs/RESEARCH.md](docs/RESEARCH.md) | Analisis T3 Code dan MXterm Pro |
-| [AGENTS.md](AGENTS.md) | Aturan untuk coding agent (dibaca Codex; `CLAUDE.md` mengimpornya) |
+agentdeck menyatukan beberapa CLI coding agent dalam pane yang bisa dibagi, lalu memberi mereka jalur kerja sama yang terlihat dan dikendalikan pengguna. Satu agent dapat meminta agent lain membuka pane, mengirim tugas, membaca layar pane lain, dan mengembalikan hasil melalui server MCP lokal.
 
-## Build untuk dipakai sendiri
-```bash
+Setiap agent tetap berjalan sebagai binary resmi milik providernya. agentdeck menyediakan terminal, lifecycle process, validasi kebijakan, antrean pesan, dan jembatan MCP tanpa mengambil alih login atau mengubah konfigurasi global agent.
+
+> **Status proyek:** tahap awal. MVP inti sudah berjalan di macOS (Apple Silicon); Phase 0–4 selesai, pengujian ulang alur Codex masih berlangsung. Belum ada rilis biner: build sendiri dari sumber. Notarization dan updater belum ada.
+
+> agentdeck tidak berafiliasi dengan, atau didukung oleh, Anthropic maupun OpenAI. Claude Code dan Codex adalah merek milik pemiliknya masing-masing. Kamu memasang dan login sendiri ke CLI tersebut, dan agent yang saling memberi tugas memakai kuota paketmu sendiri.
+
+## Mengapa agentdeck
+
+Workflow review antar agent biasanya memerlukan beberapa jendela terminal dan copy-paste manual. agentdeck membuat alur itu dapat dilacak dari satu workspace:
+
+- buka Claude Code, Codex, atau shell dalam pane terpisah;
+- susun pane secara horizontal atau vertikal dan fokus dengan keyboard;
+- izinkan agent membuka agent lain melalui kartu persetujuan;
+- kirim prompt antar pane lewat MCP dengan antrean dan status pengiriman;
+- lihat log pesan, status pane, relasi parent–child, dan hasil kerja pada UI yang sama;
+- hentikan pane dan seluruh grup prosesnya saat pengguna menutup aplikasi.
+
+## Cara kerja
+
+~~~text
+┌────────────────────────────── agentdeck.app ──────────────────────────────┐
+│ React + xterm.js                  Rust core                                │
+│ ┌────────────────────────────┐   ┌──────────────────────────────────────┐ │
+│ │ sidebar, split pane,       │   │ PTY · status · policy · delivery     │ │
+│ │ approval card, message log │◀─▶│ MCP server · store                  │ │
+│ └────────────────────────────┘   └──────────────────┬───────────────────┘ │
+└─────────────────────────────────────────────────────┼─────────────────────┘
+                                                      │ MCP over loopback
+                         ┌────────────────────────────┴────────────────────┐
+                         │                                                   │
+                    Claude Code                                          Codex
+                    pane p1                                               pane p2
+~~~
+
+Core Rust menjalankan setiap CLI langsung di PTY dan meneruskan output ke xterm.js. Agent memanggil tool agentdeck melalui HTTP MCP pada `127.0.0.1` menggunakan token unik per pane. Saat pesan siap dikirim, agentdeck menempelkannya ke PTY tujuan seperti input pengguna, kemudian mencatat statusnya di log.
+
+## Batas keamanan
+
+Keamanan berada di core Rust dan diterapkan pada setiap permintaan MCP:
+
+- server MCP hanya bind ke loopback dan menolak `Host` asing atau `Origin` apa pun;
+- setiap pane agent memakai token acak yang hanya hidup di memori dan environment proses anak;
+- agentdeck tidak membaca keychain, cookie, `auth.json`, atau berkas kredensial provider;
+- config global Claude Code dan Codex tidak ditulis; injeksi MCP dilakukan per peluncuran;
+- agent yang dibuka oleh agent tidak menerima flag bypass izin;
+- spawn, pengiriman peer, batas antrean, rate limit, dan pengaman putaran divalidasi di Rust;
+- token dan kredensial tidak ditulis ke log, UI, atau pesan galat.
+
+## Prasyarat
+
+Untuk pengembangan di macOS:
+
+- macOS 13 atau lebih baru;
+- Xcode atau Command Line Tools;
+- Rust stable melalui `rustup`;
+- Node.js 22 atau lebih baru;
+- pnpm;
+- Claude Code dan/atau Codex yang sudah dipasang dan login untuk mencoba workflow agent.
+
+Versi dan panduan lengkap ada di [docs/SETUP.md](docs/SETUP.md).
+
+## Mulai cepat
+
+~~~bash
+git clone https://github.com/Nuzzy32/agentdeck.git
+cd agentdeck
 pnpm install
-pnpm tauri build
-```
-Hasilnya `src-tauri/target/release/bundle/macos/agentdeck.app` (dan `.dmg` di `bundle/dmg/`). Salin `.app` ke
-`/Applications`. Build tidak ditandatangani, jadi saat pertama dibuka macOS bisa meminta konfirmasi (klik kanan → Open).
-Pembaruan: `git pull`, lalu build ulang.
+pnpm tauri dev
+~~~
 
-## Mulai
-Prasyarat dan langkah ada di [docs/SETUP.md](docs/SETUP.md). Phase 0 sudah selesai ([docs/PHASE-0.md](docs/PHASE-0.md));
-lanjutkan dari [docs/PROGRESS.md](docs/PROGRESS.md) dan task di [docs/IMPLEMENTATION-PLAN.md](docs/IMPLEMENTATION-PLAN.md).
+Jendela agentdeck akan terbuka dalam mode pengembangan. Dari sana, pilih **Shell**, **Claude Code**, atau **Codex** pada launcher. Untuk membuat aplikasi macOS yang bisa dipakai sendiri:
+
+~~~bash
+pnpm tauri build
+~~~
+
+Output utama berada di `src-tauri/target/release/bundle/macos/agentdeck.app`; paket `.dmg` berada di folder `bundle/dmg/`. Build lokal belum ditandatangani sertifikat Developer ID, sehingga macOS dapat meminta konfirmasi saat pertama kali dibuka.
+
+## Perintah pengembangan
+
+| Tujuan | Perintah |
+|---|---|
+| Jalankan aplikasi | `pnpm tauri dev` |
+| Typecheck UI | `pnpm typecheck` |
+| Tes UI | `pnpm test` |
+| Format Rust | `cargo fmt --manifest-path src-tauri/Cargo.toml` |
+| Lint Rust | `cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings` |
+| Tes Rust | `cargo test --manifest-path src-tauri/Cargo.toml` |
+| Build aplikasi | `pnpm tauri build` |
+
+Sebelum mengirim perubahan, jalankan pemeriksaan yang relevan dan coba perilaku terminal atau agent di `pnpm tauri dev`, bukan hanya melalui unit test.
+
+## Struktur proyek
+
+| Lokasi | Tanggung jawab |
+|---|---|
+| `src/` | UI React dan TypeScript: layout workspace, pane, launcher, approval card, message log, settings |
+| `src-tauri/src/` | Core Rust: PTY, lifecycle process, status agent, policy, delivery, MCP, persistence |
+| `src-tauri/icons/` | Sumber dan output ikon aplikasi Tauri |
+| `tests/` | Fixture dan fake agent untuk pengujian integrasi |
+| `spikes/` | Spike kelayakan PTY, throughput, screen reader, dan MCP |
+| `docs/` | PRD, arsitektur, kontrak tool, UI/UX, keputusan, setup, dan progres |
+
+## Dokumentasi
+
+- [PRD](docs/PRD.md) — tujuan produk, kebutuhan, alur pengguna, dan roadmap.
+- [Arsitektur](docs/ARCHITECTURE.md) — hubungan UI, core Rust, PTY, status, delivery, dan MCP.
+- [Kontrak MCP](docs/MCP-TOOLS.md) — tool, argumen, batas, dan kode galat untuk agent.
+- [UI/UX](docs/UI-UX.md) — struktur layar, interaksi, pintasan, status, dan token desain.
+- [Rencana implementasi](docs/IMPLEMENTATION-PLAN.md) — urutan phase dan kriteria selesai.
+- [Progress](docs/PROGRESS.md) — fitur yang sudah diuji, batasan yang diketahui, dan titik lanjut.
+- [Phase 0](docs/PHASE-0.md) — bukti spike dengan CLI asli.
+- [Setup](docs/SETUP.md) — instalasi, dependency, dan perintah harian.
+- [Decision log](docs/DECISIONS.md) — keputusan arsitektur dan alasan teknisnya.
+- [Research](docs/RESEARCH.md) — riset pendekatan dan produk pembanding.
+
+## Batasan saat ini
+
+agentdeck masih ditujukan untuk pemakaian pribadi di macOS. Beberapa bagian masih menunggu pengujian ulang dengan kapasitas server Codex yang tersedia, termasuk Codex sebagai reviewer dan pemanggil `pane_spawn`. Windows, Linux, akun cloud, sinkronisasi jarak jauh, updater, dan notarization belum menjadi target MVP.
+
+## Kontribusi
+
+Baca [AGENTS.md](AGENTS.md) sebelum mengubah kode. Dokumen tersebut menjelaskan batas keamanan, aturan provider, workflow pengujian, dan konvensi proyek. Perubahan pada kontrak MCP atau arsitektur harus dicatat di [docs/DECISIONS.md](docs/DECISIONS.md) dan dokumen terkait.
+
+## Lisensi dan ketentuan provider
+
+agentdeck dirilis di bawah [Apache License 2.0](LICENSE). Material pihak ketiga yang disertakan, termasuk aturan deteksi status dari [herdr](https://github.com/herdrdev/herdr) (Apache-2.0), tercatat di [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+Claude Code dan Codex tetap tunduk pada ketentuan masing-masing provider; pastikan pemakaianmu sesuai dengan ketentuan paket yang kamu pakai. Pengguna memasang dan login sendiri ke binary resmi tersebut; agentdeck tidak menyediakan login, tidak mengubah binary, dan tidak meneruskan kredensial provider.
