@@ -420,6 +420,7 @@ fn pane_manager_reports_status_and_exit_code_in_both_modes() {
             ],
             env: launch::env(|k| std::env::var_os(k), "/usr/bin:/bin"),
             osc_status: true,
+            detect: None,
         };
         let on_event = Box::new(move |ev| {
             let _ = tx.send(ev);

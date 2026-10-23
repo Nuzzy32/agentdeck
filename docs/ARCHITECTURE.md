@@ -251,6 +251,7 @@ Status: `starting`, `working`, `idle`, `needs_you`, `exited`, `unknown`. Sumber,
 |---|---|---|
 | Escape dari agen sendiri | OSC 7501 (Program Status Protocol rev 0.4, superlogical.com/rex/docs/build/program-status). Claude mengirim query `OSC 7501;?` dan **hanya melapor bila terminal menjawab**; agentdeck menjawab `ESC]7501;?:states=idle,working,done,blocked,error:kinds=permission,question,auth ESC\` (S4, D-016). Terlihat: `idle`, `working` (+`msg`), `done`, `blocked:kind=permission` (+`msg` base64 mis. "approve Write: …"). | OSC 7501 tanpa query: `state=idle\|working:app=codex` (S1, S5). `blocked` saat minta izin, tanpa `kind` dan `msg` (S5, D-017). Setelah galat server Codex melapor `idle`, bukan `error`. |
 | Hook, OSC 9 | Tidak dipakai (D-016). Ditinjau ulang hanya bila OSC 7501 berubah. | Tidak dipakai (D-017). |
+| Layar (D-035) | Tidak dipakai (OSC 7501). | Tidak dipakai. Agen pengguna dengan `status = "screen"`: aturan herdr `detect` dibaca dari layar `vt100` + judul OSC 0/2 + OSC 9 tiap 300 ms (`detect.rs`); `blocked` → `needs_you`. |
 | Heuristik | output dalam 1 detik terakhir → `working`; selain itu `unknown` | sama |
 
 Pemetaan OSC 7501 → status agentdeck: `idle`/`done` → `idle`, `working` → `working`, `blocked` → `needs_you` (label

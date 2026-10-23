@@ -32,6 +32,8 @@ pub struct Launch {
     pub env: Vec<(String, OsString)>,
     /// Agen melapor status lewat OSC 7501 (semua agen bawaan); shell tidak dipindai.
     pub osc_status: bool,
+    /// Id manifest herdr: status dibaca dari layar (`status = "screen"`, D-035).
+    pub detect: Option<String>,
 }
 
 /// Nilai env tidak dicetak: `AGENTDECK_TOKEN` ada di sana (AGENTS.md aturan 6).
@@ -41,6 +43,7 @@ impl fmt::Debug for Launch {
             .field("argv", &self.argv)
             .field("env", &self.env.iter().map(|(k, _)| k).collect::<Vec<_>>())
             .field("osc_status", &self.osc_status)
+            .field("detect", &self.detect)
             .finish()
     }
 }
@@ -106,6 +109,7 @@ pub fn shell(mut env: Vec<(String, OsString)>) -> Launch {
         argv: vec![shell, "-l".into()],
         env,
         osc_status: false,
+        detect: None,
     }
 }
 
@@ -185,7 +189,13 @@ pub fn agent(
     Ok(Launch {
         argv,
         env,
-        osc_status: agent.status != StatusSource::None,
+        osc_status: matches!(
+            agent.status,
+            StatusSource::Osc7501Query | StatusSource::Osc7501
+        ),
+        detect: (agent.status == StatusSource::Screen)
+            .then(|| agent.detect.clone())
+            .flatten(),
     })
 }
 
@@ -517,6 +527,21 @@ mod tests {
         assert_eq!(l.argv[1..], ["--", "x"]);
         assert!(!l.env.iter().any(|(k, _)| k.starts_with("AGENTDECK_")));
         assert!(!l.osc_status);
+        assert_eq!(l.detect, None);
+        // D-035: a screen-read agent gets its herdr rules, no OSC scan.
+        cat.agents.last_mut().unwrap().status = StatusSource::Screen;
+        cat.agents.last_mut().unwrap().detect = Some("gemini".into());
+        let l = agent(
+            &cat,
+            "gemini",
+            None,
+            env(polluted, &path),
+            None,
+            None,
+            false,
+        )
+        .unwrap();
+        assert_eq!((l.osc_status, l.detect.as_deref()), (false, Some("gemini")));
     }
 
     #[test]

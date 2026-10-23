@@ -598,7 +598,7 @@ halaman merek OpenAI menjawab 403 (hanya terbaca lewat cuplikan pencarian, belum
   saat ditutup worktree dan branch yang tidak berubah terhapus, tidak ada proses tersisa. Peluncur belum diklik di
   aplikasi: layar terkunci saat diuji (tidak ada app frontmost, screenshot jendela gagal).
 
-## D-035 — Deteksi status dari layar dengan aturan herdr untuk agen tanpa OSC 7501 (RENCANA, 2026-10-23)
+## D-035 — Deteksi status dari layar dengan aturan herdr untuk agen tanpa OSC 7501 (2026-10-23)
 - **Masalah.** Agen katalog pengguna (`status = "none"`, mis. Gemini, OpenCode, Cursor, Qwen) tidak melapor OSC 7501.
   Statusnya hanya heuristik output di UI, jadi antrean pesan memperlakukannya `unknown` (menunggu layar sepi) dan
   `needs_you` tidak pernah muncul saat agen menunggu izin.
@@ -634,6 +634,25 @@ halaman merek OpenAI menjawab 403 (hanya terbaca lewat cuplikan pencarian, belum
   (blocked/working/idle), tes debounce dengan jam palsu, tes katalog (`detect` tak dikenal ditolak). Di aplikasi: agen
   pengguna asli yang terpasang (Gemini/OpenCode bila ada), selain itu fake-agent yang menggambar layar contoh.
 - **Ukuran.** ±1000 baris Rust termasuk tes, satu sesi kerja.
-- **Keputusan pemilik yang tersisa.** (1) Setuju menambah `regex`. (2) Deteksi layar juga sebagai cadangan untuk
-  Claude/Codex bila OSC 7501 tidak datang (mis. versi CLI lain)? Saran: belum, OSC tetap satu-satunya sumber untuk
-  keduanya sampai ada kasus nyata.
+- **Diputuskan pemilik 2026-10-23:** `regex` ditambah; Claude/Codex tetap hanya OSC 7501 (cadangan layar menunggu
+  kasus nyata; tinggal `status = "screen"` + `detect = "claude"` di katalog pengguna).
+- **Implementasi.** `herdr/manifests/` (22 berkas, kepala asal-usul), `herdr/LICENSE`, `THIRD_PARTY_NOTICES.md`
+  (keduanya ikut di bundel: `Contents/Resources/licenses/`), `detect.rs` (mesin + `Smoother`), `Screen::detection_text`
+  (baris layar terlihat + judul OSC 0/2 + payload OSC 9 lewat `vt100::Callbacks`), katalog `status = "screen"` +
+  `detect` (divalidasi, `detect` tanpa `screen` ditolak), thread `pane-N-detect` per pane di `pty.rs` yang berhenti saat
+  proses keluar dan mengirim `PaneEvent::Status` yang sama dengan jalur OSC (`blocked` → `needs_you` "butuh kamu").
+  Layar yang tidak berubah tidak dinilai ulang. Penghalus yang di-port: masa tenggang 3 s dan tahan working → idle
+  (3 bacaan / 700 ms); pengulangan blocker tiap 800 ms tidak di-port karena status disimpan core.
+- **Uji.** 13 tes `detect` (11 di-port dari herdr + aturan bawaan pada layar contoh + penghalus dengan jam palsu),
+  tes `screen` (OSC), tes katalog dan launch, tes PTY: program yang menggambar dialog izin Gemini dilaporkan
+  `needs_you` setelah masa tenggang. `cargo test` 216 lulus.
+- **Uji dengan agen asli (Gemini CLI 0.46.0, `tests/screen_cli.rs`, manual):** jalur bekerja (status pertama
+  dipublikasikan dari layar asli), tetapi **aturan Gemini herdr (versi 2026.06.10.1, 2 aturan) tidak mengenali dialog
+  "Do you trust the files in this folder?" maupun menu login**: keduanya terbaca `idle` (fallback), dan footer
+  "Esc to cancel" pada dialog login terbaca `working`. Gemini di mesin pemilik juga tidak bisa dipakai lagi
+  ("This client is no longer supported… migrate to Antigravity"). Pada uji pertama, teks prompt uji masuk ke menu login
+  dan Enter memilih "Sign in with Google"; dialog lanjutannya tidak dijawab dan pane ditutup, jadi tidak ada login.
+  Uji manual sejak itu hanya mengamati dan tidak mengetik apa pun.
+- **Batasan.** Mutu deteksi per agen = mutu aturan herdr untuk agen itu; aturan Gemini tipis. Aturan tambahan buatan
+  agentdeck (dialog trust/login) belum dibuat: perlu berkas aturan terpisah milik agentdeck, bukan mengubah berkas
+  herdr.

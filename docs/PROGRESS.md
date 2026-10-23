@@ -47,7 +47,7 @@ Lanjutkan mengirim pesan tertahan dan penghitung mulai lagi; Hentikan dan buang 
 `dropped` "stopped by the person at the loop guard", audit `loop_paused`. `pane_read` dipanggil Claude asli dan
 membaca layar pane lain dengan benar.
 
-**Keputusan tertunda pemilik:** D-019 (teruskan kunci API lewat daftar izin?). D-034 diputuskan (c) 2026-10-23. D-035 (deteksi status dari layar dengan aturan herdr) menunggu persetujuan: `regex` dan cakupan Claude/Codex. Diputuskan 2026-10-23: distribusi
+**Keputusan tertunda pemilik:** D-019 (teruskan kunci API lewat daftar izin?). D-034 diputuskan (c) 2026-10-23. D-035 (deteksi status dari layar dengan aturan herdr) dibuat; aturan Gemini herdr tipis (dialog trust/login tidak dikenali). Diputuskan 2026-10-23: distribusi
 pribadi, rilis publik ditunda, nama tetap agentdeck (D-026).
 
 **Catatan lingkungan pemilik:**

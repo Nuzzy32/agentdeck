@@ -16,8 +16,38 @@ pub enum InputState {
 }
 
 pub struct Screen {
-    parser: vt100::Parser,
+    parser: vt100::Parser<Osc>,
     last_output: Option<Instant>,
+}
+
+/// Longest OSC title or progress kept for the screen rules (herdr `AGENT_OSC_MAX_CHARS`, D-035).
+const OSC_MAX_CHARS: usize = 256;
+
+/// The last OSC 0/2 title and OSC 9 payload (`4;0;`), control characters dropped, as herdr's rules expect them.
+#[derive(Default)]
+struct Osc {
+    title: String,
+    progress: String,
+}
+
+fn sanitize(bytes: &[u8]) -> String {
+    String::from_utf8_lossy(bytes)
+        .chars()
+        .filter(|c| !c.is_control())
+        .take(OSC_MAX_CHARS)
+        .collect()
+}
+
+impl vt100::Callbacks for Osc {
+    fn set_window_title(&mut self, _: &mut vt100::Screen, title: &[u8]) {
+        self.title = sanitize(title);
+    }
+
+    fn unhandled_osc(&mut self, _: &mut vt100::Screen, params: &[&[u8]]) {
+        if let [b"9", rest @ ..] = params {
+            self.progress = sanitize(&rest.join(&b';'));
+        }
+    }
 }
 
 fn size(n: u16) -> NonZeroU16 {
@@ -27,7 +57,12 @@ fn size(n: u16) -> NonZeroU16 {
 impl Screen {
     pub fn new(rows: u16, cols: u16) -> Self {
         Self {
-            parser: vt100::Parser::new(size(rows), size(cols), SCROLLBACK),
+            parser: vt100::Parser::new_with_callbacks(
+                size(rows),
+                size(cols),
+                SCROLLBACK,
+                Osc::default(),
+            ),
             last_output: None,
         }
     }
@@ -60,6 +95,25 @@ impl Screen {
 
     pub fn alternate_screen(&self) -> bool {
         self.parser.screen().alternate_screen()
+    }
+
+    /// What herdr's rules read (D-035): the visible rows, right-trimmed, trailing blank rows dropped, each ending in
+    /// `\n`; plus the last OSC title and OSC 9 payload.
+    // ponytail: herdr ends the window at the cursor or last non-empty row and may reach a few rows into scrollback;
+    // the visible screen is the same whenever the screen is full, which is when agents draw their footers.
+    pub fn detection_text(&self) -> (String, String, String) {
+        let s = self.parser.screen();
+        let cols = s.size().1.get();
+        let mut rows: Vec<String> = s.rows(0, cols).map(|r| r.trim_end().to_owned()).collect();
+        while rows.last().is_some_and(|r| r.is_empty()) {
+            rows.pop();
+        }
+        let mut text = rows.join("\n");
+        if !text.is_empty() {
+            text.push('\n');
+        }
+        let osc = self.parser.callbacks();
+        (text, osc.title.clone(), osc.progress.clone())
     }
 
     /// The last `lines` rows of scrollback + screen as plain text, trailing blank rows dropped. The alternate screen
@@ -166,6 +220,33 @@ mod tests {
             s.process(c);
         }
         s
+    }
+
+    /// D-035: the rules read the visible rows plus the last OSC title and OSC 9 payload, cleaned like herdr's.
+    #[test]
+    fn detection_text_and_osc_capture() {
+        let s = screen(
+            5,
+            20,
+            &[
+                b"\x1b]0;\xe2\x9c\xb3 task\x07",
+                b"\x1b]9;4;0;\x07",
+                b"line one   \r\n\r\nline three",
+            ],
+        );
+        let (text, title, progress) = s.detection_text();
+        assert_eq!(text, "line one\n\nline three\n");
+        assert_eq!(title, "\u{2733} task");
+        assert_eq!(progress, "4;0;");
+        // A new title replaces the old one; control characters are dropped and length is capped.
+        let long = format!("\x1b]2;a\x01b{}\x07", "x".repeat(400));
+        let s = screen(3, 10, &[b"\x1b]2;old\x07", long.as_bytes()]);
+        let (text, title, _) = s.detection_text();
+        assert_eq!(text, "");
+        assert!(
+            title.starts_with("abx") && title.chars().count() == OSC_MAX_CHARS,
+            "{title}"
+        );
     }
 
     fn numbered(n: usize) -> Vec<u8> {

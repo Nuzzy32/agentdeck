@@ -4,7 +4,7 @@
 use std::collections::{HashMap, VecDeque};
 use std::io::{Read, Write};
 use std::path::Path;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
@@ -13,6 +13,7 @@ use serde::Serialize;
 use tauri::State;
 use tauri::ipc::{Channel, InvokeResponseBody};
 
+use crate::detect;
 use crate::launch::Launch;
 use crate::screen::Screen;
 use crate::status::{self, AgentStatus, Kind, QUERY_REPLY, Report, Scanner, Tracker};
@@ -47,6 +48,66 @@ pub enum PaneEvent {
 
 pub type OnEvent = Box<dyn Fn(PaneEvent) + Send>;
 
+/// Screen state for agents without OSC 7501 (D-035): reads the pane's screen every [`detect::POLL`] with herdr's rules
+/// and reports changes like the OSC path does, until the process exits. Only reads; never writes to the PTY.
+fn spawn_detector(
+    id: u32,
+    rules: &'static detect::Manifest,
+    screen: Arc<Mutex<Screen>>,
+    on_event: Arc<Mutex<OnEvent>>,
+    exited: Arc<AtomicBool>,
+) {
+    let run = move || {
+        let mut smoother = detect::Smoother::new(Instant::now());
+        let mut last: Option<(String, String, String)> = None;
+        loop {
+            std::thread::sleep(if smoother.pending() {
+                detect::PENDING_POLL
+            } else {
+                detect::POLL
+            });
+            if exited.load(Ordering::Acquire) {
+                break;
+            }
+            let now_text = lock(&screen).detection_text();
+            // An unchanged screen gives the same reading; only an idle being confirmed needs it again.
+            if last.as_ref() == Some(&now_text) && !smoother.pending() && smoother.published() {
+                continue;
+            }
+            let (text, title, progress) = &now_text;
+            let reading = rules.detect(detect::Input {
+                screen: text,
+                osc_title: title,
+                osc_progress: progress,
+            });
+            last = Some(now_text);
+            if let Some(state) = smoother.update(&reading, Instant::now()) {
+                (lock(&on_event))(screen_event(state));
+            }
+        }
+    };
+    if let Err(e) = std::thread::Builder::new()
+        .name(format!("pane-{id}-detect"))
+        .spawn(run)
+    {
+        eprintln!("agentdeck: screen detection not started for pane {id}: {e}");
+    }
+}
+
+fn screen_event(state: detect::State) -> PaneEvent {
+    PaneEvent::Status {
+        status: match state {
+            detect::State::Idle => "idle",
+            detect::State::Working => "working",
+            detect::State::Blocked => "needs_you",
+            detect::State::Unknown => "unknown",
+        },
+        kind: None,
+        msg: None,
+        error: false,
+    }
+}
+
 fn status_event(report: Option<&Report>) -> PaneEvent {
     let mapped = report.and_then(Report::mapped);
     PaneEvent::Status {
@@ -73,7 +134,7 @@ struct StatusScan {
 }
 
 impl StatusScan {
-    fn feed(&mut self, chunk: &[u8], writer: &Writer, on_event: &OnEvent) {
+    fn feed(&mut self, chunk: &[u8], writer: &Writer, on_event: &Mutex<OnEvent>) {
         for ev in self.scanner.feed(chunk) {
             match ev {
                 status::Event::Query => {
@@ -86,7 +147,7 @@ impl StatusScan {
                     let before = self.tracker.current().cloned();
                     self.tracker.apply(r);
                     if self.tracker.current() != before.as_ref() {
-                        on_event(status_event(self.tracker.current()));
+                        (lock(on_event))(status_event(self.tracker.current()));
                     }
                 }
             }
@@ -302,6 +363,14 @@ impl PaneManager {
             scanner: Scanner::default(),
             tracker: Tracker::default(),
         });
+        // Shared with the screen detector (D-035), which reports from its own thread.
+        let on_event = Arc::new(Mutex::new(on_event));
+        let exited = Arc::new(AtomicBool::new(false));
+        if let (Some(rules), Some(screen)) =
+            (launch.detect.as_deref().and_then(detect::manifest), &screen)
+        {
+            spawn_detector(id, rules, screen.clone(), on_event.clone(), exited.clone());
+        }
 
         std::thread::Builder::new()
             .name(format!("pane-{id}-reader"))
@@ -326,7 +395,8 @@ impl PaneManager {
                 }
                 // Reap the child so it does not linger as a zombie (and so close sees the group empty).
                 let code = child.wait().ok().map(|s| s.exit_code());
-                on_event(PaneEvent::Exited { code });
+                exited.store(true, Ordering::Release);
+                (lock(&on_event))(PaneEvent::Exited { code });
             })
             .map_err(err)?;
         Ok(id)
@@ -643,6 +713,7 @@ mod tests {
             argv: a.iter().map(|s| s.to_string()).collect(),
             env: launch::env(|k| std::env::var_os(k), &path),
             osc_status: false,
+            detect: None,
         }
     }
 
@@ -658,6 +729,38 @@ mod tests {
             }),
             rx,
         )
+    }
+
+    /// D-035: an agent without OSC 7501 drawing Gemini's change prompt is reported `needs_you` once the startup
+    /// grace is over, from the screen alone; the detector stops with the process.
+    #[test]
+    fn screen_detector_reports_a_drawn_permission_prompt() {
+        let pm = PaneManager::default();
+        let (on_event, rx) = events();
+        let screen = Arc::new(Mutex::new(Screen::new(10, 60)));
+        let l = Launch {
+            detect: Some("gemini".into()),
+            ..argv(&[
+                "/bin/sh",
+                "-c",
+                "printf '\\342\\224\\202 Apply this change?\\n'; sleep 5",
+            ])
+        };
+        pm.spawn(&l, Path::new("/"), (10, 60), Some(screen), on_event)
+            .unwrap();
+        let first = rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        assert_eq!(
+            first,
+            PaneEvent::Status {
+                status: "needs_you",
+                kind: None,
+                msg: None,
+                error: false
+            }
+        );
+        let next = rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        assert!(matches!(next, PaneEvent::Exited { .. }), "{next:?}");
+        pm.close_all();
     }
 
     #[test]

@@ -42,6 +42,8 @@ pub enum StatusSource {
     Osc7501,
     /// Agen pengguna tanpa OSC 7501: tidak dipindai.
     None,
+    /// Agen pengguna tanpa OSC 7501: status dibaca dari layar dengan aturan herdr `detect` (D-035).
+    Screen,
 }
 
 /// Perintah status login resmi milik CLI (AGT-05). argv-nya tetap di sini, bukan di katalog.
@@ -65,6 +67,9 @@ pub struct Agent {
     /// Kosong = agen diluncurkan tanpa injeksi MCP.
     #[serde(default)]
     pub mcp_args: Vec<String>,
+    /// Id manifest herdr untuk `status = "screen"` (D-035), mis. `gemini`; wajib dengan `screen`, dilarang tanpanya.
+    #[serde(default)]
+    pub detect: Option<String>,
     pub task_args: Vec<String>,
     /// Melanjutkan percakapan pane yang dipulihkan (D-030); `{session}` diganti id sesi berbentuk UUID. Kosong = agen
     /// selalu mulai baru.
@@ -222,6 +227,20 @@ impl Catalogue {
 
 impl Agent {
     fn validate(&self) -> Result<(), String> {
+        match (&self.status, &self.detect) {
+            (StatusSource::Screen, Some(id)) if crate::detect::manifest(id).is_none() => {
+                return Err(format!(
+                    "detect = \"{id}\" tidak dikenal; pilih salah satu: {}",
+                    crate::detect::ids().join(", ")
+                ));
+            }
+            (StatusSource::Screen, None) => {
+                return Err("status = \"screen\" butuh detect = \"<id aturan herdr>\"".into());
+            }
+            (StatusSource::Screen, Some(_)) => {}
+            (_, Some(_)) => return Err("detect hanya dipakai dengan status = \"screen\"".into()),
+            (_, None) => {}
+        }
         let id_ok = !self.id.is_empty()
             && self
                 .id
@@ -876,6 +895,41 @@ status = "none"
 task_args = ["--", "{task}"]
 api_key_env = ["GEMINI_API_KEY"]
 "#;
+
+    /// D-035: `status = "screen"` needs a known herdr `detect` id; `detect` is refused anywhere else.
+    #[test]
+    fn screen_status_needs_a_known_detect_id() {
+        let ok = GEMINI.replace(
+            "status = \"none\"",
+            "status = \"screen\"\ndetect = \"gemini\"",
+        );
+        let cat = Catalogue::parse(&ok).unwrap();
+        assert_eq!(cat.agents[0].status, StatusSource::Screen);
+        assert_eq!(cat.agents[0].detect.as_deref(), Some("gemini"));
+        for bad in [
+            GEMINI.replace("status = \"none\"", "status = \"screen\""),
+            GEMINI.replace(
+                "status = \"none\"",
+                "status = \"screen\"\ndetect = \"nope\"",
+            ),
+            GEMINI.replace(
+                "status = \"none\"",
+                "status = \"none\"\ndetect = \"gemini\"",
+            ),
+        ] {
+            assert!(Catalogue::parse(&bad).is_err(), "{bad}");
+        }
+        let unknown = Catalogue::parse(&GEMINI.replace(
+            "status = \"none\"",
+            "status = \"screen\"\ndetect = \"nope\"",
+        ))
+        .unwrap_err()
+        .to_string();
+        assert!(
+            unknown.contains("opencode"),
+            "lists the known ids: {unknown}"
+        );
+    }
 
     #[test]
     fn user_catalogue_merges_with_builtin() {

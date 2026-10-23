@@ -1,6 +1,7 @@
 pub mod approvals;
 pub mod catalogue;
 pub mod delivery;
+pub mod detect;
 pub mod launch;
 pub mod layout;
 pub mod mcp;

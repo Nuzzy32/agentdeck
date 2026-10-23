@@ -1,0 +1,30 @@
+# From herdr (https://github.com/herdrdev/herdr), src/detect/manifests/pi.toml at commit 6b526626f66e22c08962a7f39a83fc9ac2ebda62.
+# Licensed under the Apache License, Version 2.0 (see ../LICENSE). Copied unchanged by agentdeck except for this header (D-035).
+
+id = "pi"
+version = "2026.10.01.1"
+min_engine_version = 1
+updated_at = "2026-10-01T00:00:00Z"
+aliases = ["herdr:pi"]
+
+[[rules]]
+id = "working_literal"
+state = "working"
+priority = 100
+region = "whole_recent"
+visible_working = true
+any = [
+  { contains = ["Working..."] },
+  { line_regex = ['^[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] Working$'] },
+]
+
+[[rules]]
+id = "working_border"
+state = "working"
+priority = 100
+region = "bottom_non_empty_lines(12)"
+visible_working = true
+any = [
+  { line_regex = ['^── [⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] Working ─+$'] },
+  { line_regex = ['^[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] Working$'] },
+]

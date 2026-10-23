@@ -34,6 +34,8 @@ axum = "0.8"
 tokio = { version = "1", features = ["net", "rt", "macros", "sync", "time"] }
 # Headless terminal screen per pane (screen.rs); proven against both TUIs in spike S7 (D-013).
 vt100 = "0.18"
+# Screen state rules ported from herdr (detect.rs, D-035); the official rust-lang crate, linear-time matching.
+regex = "1"
 # Native folder picker in the launcher (UI-UX §4.1, D-021). Official Tauri plugin; only `dialog:allow-open` granted.
 tauri-plugin-dialog = "2"
 # macOS notification for a spawn card while the window is not focused (UI-UX §4.2, D-022). Sent from Rust only.

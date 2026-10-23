@@ -4,6 +4,8 @@
 # - install:   perintah pasang untuk disalin pengguna; agentdeck tidak pernah menjalankannya (AGT-02).
 # - status:    osc7501_query = agen baru melapor setelah query `OSC 7501;?` dijawab (Claude, D-016);
 #              osc7501 = agen melapor tanpa query (Codex).
+#              Agen pengguna: none = tidak dipindai; screen = dibaca dari layar dengan aturan herdr, butuh
+#              detect = "<id herdr>" (mis. "gemini", "opencode", "cursor", "qwen"; D-035).
 # - mcp_args:  argv injeksi MCP. `{mcp_url}` diganti URL server lokal. Token tidak pernah masuk argv: agen membacanya
 #              dari env AGENTDECK_TOKEN (Claude mengekspansi `${VAR}` sendiri).
 #              Opsional untuk agen pengguna: tanpa mcp_args agen jalan tanpa injeksi.
