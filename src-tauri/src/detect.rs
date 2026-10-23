@@ -5,7 +5,8 @@
 //! working → idle hold). Licensed under the Apache License, Version 2.0; see `herdr/LICENSE`.
 //! **Changed by agentdeck:** only the bundled manifests are used (no remote catalogue, override files, cache, or
 //! explain output); `version` is kept as text; the debounce is reduced to the startup grace and the working → idle
-//! hold; types and names follow agentdeck. Rule data in `herdr/manifests/` is copied unchanged.
+//! hold; types and names follow agentdeck. Rule data in `herdr/manifests/` is copied unchanged. agentdeck's own rules
+//! (`detect-rules/`, not from herdr) are added after herdr's rules for the same agent.
 
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
@@ -272,17 +273,28 @@ const BUNDLED: [&str; 22] = [
     include_str!("../herdr/manifests/qwen.toml"),
 ];
 
+/// agentdeck's own rules for dialogs herdr's rules miss (D-035). Same schema; appended to the agent's herdr rules.
+const LOCAL: [&str; 1] = [include_str!("../detect-rules/gemini.toml")];
+
 fn bundled() -> &'static [Manifest] {
     static ALL: OnceLock<Vec<Manifest>> = OnceLock::new();
     ALL.get_or_init(|| {
-        BUNDLED
-            .iter()
-            .filter_map(|src| {
-                Manifest::parse(src)
-                    .map_err(|e| eprintln!("agentdeck: herdr manifest skipped: {e}"))
-                    .ok()
-            })
-            .collect()
+        let parse = |src: &&str| {
+            Manifest::parse(src)
+                .map_err(|e| eprintln!("agentdeck: screen rules skipped: {e}"))
+                .ok()
+        };
+        let mut all: Vec<Manifest> = BUNDLED.iter().filter_map(parse).collect();
+        for local in LOCAL.iter().filter_map(parse) {
+            match all.iter_mut().find(|m| m.answers_to(&local.id)) {
+                Some(m) if m.rules.len() + local.rules.len() <= MAX_RULES_PER_MANIFEST => {
+                    m.rules.extend(local.rules);
+                }
+                Some(m) => eprintln!("agentdeck: own rules for {} skipped: too many rules", m.id),
+                None => all.push(local),
+            }
+        }
+        all
     })
 }
 
@@ -1222,6 +1234,81 @@ contains = ["overlay-marker"]
                 .detect(screen("working…  esc to interrupt\n"))
                 .state,
             State::Working
+        );
+    }
+
+    /// agentdeck's own Gemini rules (D-035) on the screens Gemini CLI 0.46.0 drew on 2026-10-23: the trust dialog,
+    /// the sign-in menu, and the browser confirmation are blocked, even with an "Esc to cancel" footer that herdr's
+    /// rules read as working; ordinary screens keep herdr's reading.
+    #[test]
+    fn own_gemini_rules_catch_trust_and_sign_in_dialogs() {
+        let gemini = manifest("gemini").unwrap();
+        assert_eq!(
+            gemini.rules.len(),
+            5,
+            "2 herdr rules, then 3 of agentdeck's"
+        );
+        assert_eq!(gemini.rules[0].id, "apply_or_allow_change");
+        let trust = "\
+ℹ Gemini CLI update available! 0.46.0 → 0.65.0
+ ╭──────────────────────────────────────────────────╮
+ │ Do you trust the files in this folder?           │
+ │ Trusting a folder allows Gemini CLI to load its local configurations, including custom commands, hooks, MCP │
+ │ ● 1. Trust folder (agentdeck-screen-21829)       │
+ │   2. Trust parent folder (T)                     │
+ │   3. Don't trust                                 │
+ ╰──────────────────────────────────────────────────╯
+";
+        let sign_in = "\
+╭──────────────────────────────────────────────────╮
+│ ? Get started                                    │
+│   How would you like to authenticate for this project? │
+│   ● 1. Sign in with Google                       │
+│     2. Use Gemini API Key                        │
+│     3. Vertex AI                                 │
+│   Failed to sign in. Message: This client is no longer supported for Gemini Code Assist for individuals. │
+│   (Use Enter to select)                          │
+╰──────────────────────────────────────────────────╯
+";
+        let browser = "\
+╭──────────────────────────────────────────────────╮
+│  Opening authentication page in your browser.    │
+│  Do you want to continue?                        │
+│  ● 1. Yes                                        │
+│    2. No                                         │
+│  Enter to select · ↑/↓ to navigate · Esc to cancel │
+╰──────────────────────────────────────────────────╯
+";
+        for (text, rule) in [
+            (trust, "agentdeck_trust_folder_dialog"),
+            (sign_in, "agentdeck_auth_method_menu"),
+            (browser, "agentdeck_auth_browser_confirm"),
+        ] {
+            let d = gemini.detect(screen(text));
+            assert_eq!(
+                (d.state, d.rule.as_deref(), d.visible_blocker),
+                (State::Blocked, Some(rule), true)
+            );
+        }
+        assert_eq!(
+            gemini
+                .detect(screen("⠏ Thinking (esc to cancel, 3s)\n"))
+                .state,
+            State::Working
+        );
+        assert_eq!(
+            gemini
+                .detect(screen("> Type your message or @path/to/file\n"))
+                .state,
+            State::Idle
+        );
+        assert_eq!(
+            gemini
+                .detect(screen("│ Apply this change?\n│ ● 1. Yes, allow once\n"))
+                .rule
+                .as_deref(),
+            Some("apply_or_allow_change"),
+            "herdr's own blocker still wins its screens"
         );
     }
 

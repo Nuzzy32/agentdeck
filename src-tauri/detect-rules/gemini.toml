@@ -1,0 +1,36 @@
+# agentdeck's own screen rules for Gemini CLI, added after herdr's gemini.toml (D-035). Not part of herdr: herdr's
+# rules (2026.06.10.1) miss these dialogs, which then read as idle, or as working because of their "Esc to cancel"
+# footer. Seen with Gemini CLI 0.46.0 on 2026-10-23. Same schema and limits as the herdr manifests.
+
+id = "gemini"
+version = "2026.10.23.1"
+min_engine_version = 1
+
+# "Do you trust the files in this folder?" with Trust folder / Trust parent folder / Don't trust.
+[[rules]]
+id = "agentdeck_trust_folder_dialog"
+state = "blocked"
+priority = 1000
+region = "whole_recent"
+visible_blocker = true
+contains = ["do you trust the files in this folder?"]
+any = [{ contains = ["trust folder"] }, { contains = ["don't trust"] }]
+
+# "How would you like to authenticate for this project?" with Sign in with Google / Gemini API Key / Vertex AI.
+[[rules]]
+id = "agentdeck_auth_method_menu"
+state = "blocked"
+priority = 1000
+region = "whole_recent"
+visible_blocker = true
+contains = ["how would you like to authenticate"]
+any = [{ contains = ["sign in with google"] }, { contains = ["use gemini api key"] }, { contains = ["vertex ai"] }]
+
+# "Opening authentication page in your browser. Do you want to continue?" with Yes / No.
+[[rules]]
+id = "agentdeck_auth_browser_confirm"
+state = "blocked"
+priority = 1000
+region = "whole_recent"
+visible_blocker = true
+contains = ["opening authentication page in your browser", "do you want to continue?"]

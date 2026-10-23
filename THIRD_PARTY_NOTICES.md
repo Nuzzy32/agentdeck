@@ -13,3 +13,4 @@ agentdeck includes material from the following projects. Their licenses apply to
   - `src-tauri/src/detect.rs`: a modified port of the rule engine in `src/detect/manifest.rs` (schema, validation,
     matching, regions) and of the working → idle hold in `src/pane/agent_detection.rs`. Changes are listed in the
     file's header.
+- Not from herdr: `src-tauri/detect-rules/*.toml` are agentdeck's own rules, added after herdr's at load time.

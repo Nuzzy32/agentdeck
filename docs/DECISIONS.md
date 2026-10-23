@@ -653,6 +653,10 @@ halaman merek OpenAI menjawab 403 (hanya terbaca lewat cuplikan pencarian, belum
   ("This client is no longer supported… migrate to Antigravity"). Pada uji pertama, teks prompt uji masuk ke menu login
   dan Enter memilih "Sign in with Google"; dialog lanjutannya tidak dijawab dan pane ditutup, jadi tidak ada login.
   Uji manual sejak itu hanya mengamati dan tidak mengetik apa pun.
-- **Batasan.** Mutu deteksi per agen = mutu aturan herdr untuk agen itu; aturan Gemini tipis. Aturan tambahan buatan
-  agentdeck (dialog trust/login) belum dibuat: perlu berkas aturan terpisah milik agentdeck, bukan mengubah berkas
-  herdr.
+- **Batasan.** Mutu deteksi per agen = mutu aturan herdr untuk agen itu, ditambah aturan agentdeck sendiri.
+- **Aturan agentdeck sendiri (2026-10-23).** `src-tauri/detect-rules/*.toml`, skema dan batas sama dengan herdr, bukan
+  bagian herdr (tidak masuk THIRD_PARTY_NOTICES). Saat dimuat, aturannya ditambahkan **setelah** aturan herdr untuk id
+  yang sama (prioritas tertinggi menang; seri → aturan herdr); berkas herdr tidak diubah. `gemini.toml`: dialog trust
+  folder, menu cara login, dan konfirmasi membuka browser → `blocked` prioritas 1000 (mengalahkan `esc_cancel_working`
+  herdr yang membaca footer "Esc to cancel" sebagai bekerja). Tes memakai layar yang terlihat dari Gemini CLI 0.46.0;
+  uji manual (hanya mengamati) dengan Gemini asli: dialog trust kini `needs_you`.
