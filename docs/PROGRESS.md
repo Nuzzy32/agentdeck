@@ -7,8 +7,12 @@ Terakhir diperbarui: 2026-10-23. Phase 0–3 selesai (MVP); sisa Phase 4 dan uji
 **Ide dari riset BridgeMind/MXterm (RESEARCH §2–3), di `main`, belum di-push:** D-028 alasan pesan menunggu di chip
 (diuji di aplikasi dengan dua pane Claude), D-029 kuota 5 jam/7 hari + konteks Claude dari statusline resmi, D-030 pane
 Claude pulihan melanjutkan percakapan (`--resume`, sesi disimpan ulang saat aplikasi keluar). Ketiganya diuji di
-aplikasi dengan Claude 2.1.309. Kandidat berikutnya: klaim berkas,
-pustaka prompt/preset, OSC 133, papan task, tolak spawn di atas ambang kuota.
+aplikasi dengan Claude 2.1.309. Lalu tiga sesi paralel di-merge (uji gabungan di worktree sementara: cargo test 196,
+vitest 114): D-031 blok perintah OSC 133 di pane zsh (penanda gutter dan ⌘↑/⌘↓ belum dilihat di jendela aplikasi,
+hanya lewat harness browser), D-032 pustaka prompt ⌘P + preset Solo/Pair (diuji di aplikasi), D-033 `QUOTA_LOW` di
+`pane_spawn` + tool `pane_claim` (belum dengan agen asli; ambang belum di Settings, belum ada toast UI). Uji visual
+butuh izin Screen Recording untuk binary Claude Code 2.1.308 (dicabut macOS 2026-10-23 sore). Kandidat berikutnya:
+papan task, ambang kuota di Settings + toast `QUOTA_LOW`.
 
 **T3.2 sudah di-merge ke main dan di-push (2026-10-23)** (`pane_spawn` + audit + worktree + uji alur B, D-024). MVP
 (alur B) berjalan; yang belum hanya bagian Codex (lihat di bawah).
