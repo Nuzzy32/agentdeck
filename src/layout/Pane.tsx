@@ -2,7 +2,17 @@ import { type ReactNode, useState } from "react";
 import { TerminalPane } from "../pane/TerminalPane";
 import { Icon, IconButton } from "./Icon";
 import { splitMiddle } from "./logic";
-import { type Pane, statusLabel } from "./model";
+import { type Pane, type Report, reportBadge, statusLabel } from "./model";
+
+/** A child's last `pane_report` (T4.2); the label says the outcome in words, colour only repeats it. */
+function ReportBadge({ report }: { report: Report }) {
+  const { label, title } = reportBadge(report);
+  return (
+    <span className={`badge pane-report pane-report-${report.status}`} title={title}>
+      {label}
+    </span>
+  );
+}
 
 /** Status dot; shape differs per status so it never relies on colour alone (UI-UX §1.3, §3). */
 export function StatusDot({ pane }: { pane: Pane }) {
@@ -93,6 +103,7 @@ export function PaneView({
         </span>
         <span className="pane-spacer" />
         {pane.parent ? <span className="badge pane-relation">anak {pane.parent}</span> : null}
+        {pane.report ? <ReportBadge report={pane.report} /> : null}
         {pane.pending > 0 ? (
           <span className="badge chip" title={`${pane.pending} pesan menunggu dikirim ke ${pane.id}`}>
             {pane.pending} pesan

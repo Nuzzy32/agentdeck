@@ -16,7 +16,7 @@ Terakhir diperbarui: 2026-10-23. Phase 0–3 selesai (MVP); sisa Phase 4 dan uji
 - Notifikasi macOS kartu persetujuan (perlu dilihat dan diklik pemilik).
 - 6 pane agen aktif di MacBook Air M1 8 GB tanpa UI tersendat.
 
-**Task tersisa:** T4.3 pulihkan tata letak; header laporan anak (UI dari T4.2, event `agentdeck://pane-report`);
+**Task tersisa:** T4.3 pulihkan tata letak; lihat header laporan anak dengan agen asli;
 tinjau T2.6; Phase 5 (nama + bundle id final, signing + notarisasi, updater, ikon, cek ulang ketentuan provider D-006).
 
 **Risiko/batasan yang diketahui:**
@@ -72,7 +72,7 @@ merge, hapus worktree begitu masuk main, commit tanpa atribusi AI, push hanya at
 | T3.1 | `approvals.rs` (`request(req, timeout)` → Approved/Denied/Timeout, bertumpuk, batal saat pane peminta keluar), kartu di atas pane peminta (`src/cards/`: hitung mundur, ⌘Enter/Esc, tidak mencuri fokus, ⌘J), notifikasi macOS (`tauri-plugin-notification`, D-022), `approval_demo` khusus build debug | Belum dipakai `pane_spawn` (T3.2); notifikasi belum terlihat dengan mata |
 | T3.3 + T4.7 | `settings.rs` + `settings.json` (validasi rentang di Rust, tulis atomik, berkas rusak → bawaan), batas/sakelar langsung berlaku, modal Settings (⌘,: Agen/Kolaborasi/Terminal/Tentang), tema/font/ukuran/scrollback terminal dari settings | Bagian Agen memakai `agents_info` (fallback `agents_list`) Uji manual pemilik 2026-10-23 lulus: ⌘,, tema/font langsung berubah, bagian Agen (versi/path/login), stepper menolak di luar rentang, sakelar spawn ikut di status bar, Esc. |
 | T4.4 + T4.5 (core) | Katalog pengguna `agents.toml` (validasi + tolak flag bypass), path manual per agen, metode login lewat `claude auth status` (tanpa membaca kredensial), nama kunci API di shell login tanpa nilai; `agents_info`/`agent_set_path` (D-023) | UI di Settings › Agen |
-| T4.2 (core) | Tool `pane_report` (RESULT ke induk lewat jalur pane_send, NO_PARENT, REPORT_RATE 6/menit), laporan terakhir per anak, event `agentdeck://pane-report`, `pane_report_last` | Header laporan di pane anak belum (UI); induk baru ada setelah `pane_spawn` |
+| T4.2 (core) | Tool `pane_report` (RESULT ke induk lewat jalur pane_send, NO_PARENT, REPORT_RATE 6/menit), laporan terakhir per anak, event `agentdeck://pane-report`, `pane_report_last` | Header pane anak: lencana `hasil: selesai · tes lulus` (warna + kata), tooltip ringkasan/berkas/jam, dihapus saat Jalankan ulang (tes vitest). Belum dilihat dengan agen asli: Claude di pane uji 2026-10-23 menolak bekerja ("organization has disabled Claude subscription access") |
 | T3.2 + T3.4 + T4.1 | `spawn.rs` (`pane_spawn`: validasi argumen, sakelar/`NESTED`/batas/rate dengan kartu menunggu dihitung sebagai anak, katalog + terpasang, `cwd` dikanonikalisasi di dalam folder pemanggil, kartu dengan batas waktu Settings, anak lewat `panes::start` dengan induk = pemanggil, `SPAWN_FAILED`), `worktree.rs` (`.worktrees/<id>` di `agent/<id>`, exclude lokal, hook mati; dihapus saat ditutup bila tanpa perubahan, dibiarkan + toast bila berubah), audit `spawn_*`/`pane_closed`, UI: anak di samping induk dengan lencana, event `pane-spawned`/`pane-event`/`spawn-refused`, toast. `"timeout":330000` di `--mcp-config` Claude (D-024) | Tes unit tiap kode galat, `cwd` + symlink keluar, rate/kartu menunggu, audit tanpa token, worktree dibuat/dihapus/dibiarkan; integrasi fake-agent: `CALL pane_spawn` → kartu → jawab → anak dengan induk benar → `pane_report` → RESULT di induk, DENIED, worktree. Uji di aplikasi dengan CLI asli: lihat T3.5 |
 | T3.5 | Alur B di `pnpm tauri dev` dengan Claude Code 2.1.308 + Codex 0.163.0 | Lulus kecuali bagian Codex (server "at capacity", juga `gpt-5.6-luna`): kartu disetujui setelah 95 s berhasil (perlu perbaikan timeout), Codex terbuka di samping dengan "anak p1", Claude Code sebagai peninjau pengganti melapor dan induk menerima RESULT; DENIED, APPROVAL_TIMEOUT, SPAWN_OFF + toast, RATE, worktree hapus/biarkan + toast. Rincian D-024 |
 | T4.6 | Pesan queued/paused > 10 menit ditandai `held`, `message_force` (abaikan sepi/ketikan/input, tetap tolak bila keluar/bracketed paste mati/dijeda), panel: chip + "Kirim sekarang" dengan konfirmasi | — |
@@ -93,7 +93,7 @@ tidak di-merge); boleh dihapus dengan `git branch -D spike/s6`.
 ## Berikutnya
 - Ulangi alur B dengan Codex sebagai peninjau saat server OpenAI tidak "at capacity", termasuk kartu dijawab setelah
   90 s di Codex (`tool_timeout_sec=330`) dan Codex sebagai pemanggil `pane_spawn`.
-- T4.3 pulihkan tata letak, header laporan anak (UI T4.2).
+- T4.3 pulihkan tata letak.
 - Belum diuji manual: alur D (pengaman putaran di 12 pesan + pita), `pane_read` dari agen, pesan tertahan saat kotak input berisi teks.
 - T2.8: pengaman putaran + sakelar "Saling kirim" + panel Pesan di UI memakai perintah/event T2.7. T2.6: tinjau sisa.
 - Ulangi uji CLI asli T2.7 (`cargo test --test real_cli -- --ignored --nocapture`) saat Codex tidak "at capacity":

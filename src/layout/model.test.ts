@@ -4,8 +4,10 @@ import {
   applyEvent,
   expandHome,
   type Pane,
+  type Report,
   paneTitle,
   pushRecent,
+  reportBadge,
   STARTING_MS,
   statusLabel,
   tildePath,
@@ -95,5 +97,22 @@ describe("launcher helpers", () => {
     expect(paneTitle("  review: auth\nmore", "/x/app")).toBe("review: auth");
     expect(paneTitle("", "/x/app")).toBe("app");
     expect(paneTitle("x".repeat(80), "/x")).toHaveLength(60);
+  });
+});
+
+describe("reportBadge", () => {
+  const r: Report = { pane: "p2", status: "done", summary: "Fixed auth.", files: [], tests: "pass", ts: 0 };
+
+  it("says the outcome and the tests in words; no tests part for none", () => {
+    expect(reportBadge(r).label).toBe("hasil: selesai · tes lulus");
+    expect(reportBadge({ ...r, status: "failed", tests: "fail" }).label).toBe("hasil: gagal · tes gagal");
+    expect(reportBadge({ ...r, status: "blocked", tests: "none" }).label).toBe("hasil: terhambat");
+  });
+
+  it("puts the summary and files in the tooltip", () => {
+    const { title } = reportBadge({ ...r, files: ["a.rs", "b.rs"] });
+    expect(title).toContain("Fixed auth.");
+    expect(title).toContain("Berkas: a.rs, b.rs");
+    expect(reportBadge(r).title).not.toContain("Berkas");
   });
 });

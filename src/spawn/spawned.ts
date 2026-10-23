@@ -1,6 +1,6 @@
 // Panes the core opens for `pane_spawn` (T3.2, T4.1): the events, where the child goes, and the toast texts.
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import type { PaneEvent } from "../layout/model";
+import type { PaneEvent, Report } from "../layout/model";
 import { type Cell, canSplit, type Dir, type Rect, rects, split, type Tree } from "../layout/tree";
 
 /** `agentdeck://pane-spawned` (spawn.rs `Spawned`). `branch`: the child's own worktree, if any. */
@@ -30,6 +30,9 @@ export const spawnClient = {
     listen<{ pane: string; event: PaneEvent }>("agentdeck://pane-event", (e) => cb(e.payload.pane, e.payload.event)),
   onRefused: (cb: (r: SpawnRefused) => void): Promise<UnlistenFn> =>
     listen<SpawnRefused>("agentdeck://spawn-refused", (e) => cb(e.payload)),
+  // A child's `pane_report` (T4.2); its parent gets the RESULT message separately.
+  onReport: (cb: (r: Report) => void): Promise<UnlistenFn> =>
+    listen<Report>("agentdeck://pane-report", (e) => cb(e.payload)),
 };
 
 /** The child goes beside its parent: split right when there is room, else below, else right anyway. */

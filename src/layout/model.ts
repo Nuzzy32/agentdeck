@@ -18,6 +18,16 @@ export type PaneEvent =
     }
   | { type: "exited"; code: number | null };
 
+/** A child's last `pane_report` (report.rs `Report`), shown in its header (T4.2). `ts`: epoch ms. */
+export type Report = {
+  pane: string;
+  status: "done" | "failed" | "blocked";
+  summary: string;
+  files: string[];
+  tests: "pass" | "fail" | "none";
+  ts: number;
+};
+
 /** `agents_list` from catalogue.rs. */
 export type AgentInfo = { id: string; name: string; installed: boolean; version: string | null; install: string };
 
@@ -44,6 +54,7 @@ export type Pane = {
   /** Spawn failed (UI-UX §3 "Gagal dijalankan"); no process. */
   failed?: LaunchError;
   parent?: string;
+  report?: Report;
   pending: number;
   /** Core pane id from `pane_create`; null while spawning or after a failed spawn. */
   ptyId: number | null;
@@ -87,6 +98,20 @@ export function statusLabel(pane: Pane): string {
     case "unknown":
       return "tidak diketahui";
   }
+}
+
+const REPORT_LABEL: Record<Report["status"], string> = { done: "selesai", failed: "gagal", blocked: "terhambat" };
+const TESTS_LABEL: Record<Report["tests"], string | null> = { pass: "tes lulus", fail: "tes gagal", none: null };
+
+/** Header badge for a child's last report: short label, and the summary, files and time as its tooltip. */
+export function reportBadge(r: Report): { label: string; title: string } {
+  const tests = TESTS_LABEL[r.tests];
+  const time = new Date(r.ts).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" });
+  const files = r.files.length ? `\nBerkas: ${r.files.join(", ")}` : "";
+  return {
+    label: `hasil: ${REPORT_LABEL[r.status]}${tests ? ` · ${tests}` : ""}`,
+    title: `Laporan ${time}\n${r.summary}${files}`,
+  };
 }
 
 /** An agent with no official report yet stays `starting` this long before the output heuristic applies. */

@@ -382,6 +382,18 @@
   border-color: var(--accent);
   color: var(--accent);
 }
+.pane-report-done {
+  border-color: var(--ok);
+  color: var(--ok);
+}
+.pane-report-failed {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+.pane-report-blocked {
+  border-color: var(--warn);
+  color: var(--warn);
+}
 
 /* ponytail: width thresholds approximate "title already elided"; measure text if the order ever looks wrong. */
 @container pane-header (max-width: 520px) {
@@ -391,7 +403,8 @@
 }
 @container pane-header (max-width: 420px) {
   .pane-status-label,
-  .pane-relation {
+  .pane-relation,
+  .pane-report {
     display: none;
   }
 }

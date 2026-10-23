@@ -198,6 +198,8 @@ function App() {
       kind: undefined,
       msg: undefined,
       error: false,
+      // The last report belonged to the old run.
+      report: undefined,
       exitCode: undefined,
       failed: undefined,
     };
@@ -290,6 +292,12 @@ function App() {
         const text = refusedText(r);
         if (text) toast(text);
       }),
+      spawnClient.onReport((r) =>
+        setPanes((all) => {
+          const p = all[r.pane];
+          return p ? { ...all, [r.pane]: { ...p, report: r } } : all;
+        }),
+      ),
     ];
     return () => subs.forEach((u) => void u.then((off) => off()));
   }, []);
