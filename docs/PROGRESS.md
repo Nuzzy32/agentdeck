@@ -1,14 +1,11 @@
 # Progres dan titik lanjut
 
-Terakhir diperbarui: 2026-10-23. Phase 0–2 selesai; Phase 3 tinggal merge T3.2. Baca ini dulu saat melanjutkan, lalu `docs/IMPLEMENTATION-PLAN.md`.
+Terakhir diperbarui: 2026-10-23. Phase 0–3 selesai (MVP); sisa Phase 4 dan uji ulang bagian Codex. Baca ini dulu saat melanjutkan, lalu `docs/IMPLEMENTATION-PLAN.md`.
 
 ## Serah terima 2026-10-23 (baca ini dulu)
 
-**Langkah pertama:** branch `claude/t3-2-pane-spawn-aed3a3` (T3.2 `pane_spawn` + T3.4 audit + T4.1 worktree + uji alur B,
-D-024) sudah diperiksa sesi utama: semua cek lulus (166 unit, 11 fake-agent, 6 MCP, 89 Vitest), cakupan berkas benar,
-tanpa atribusi AI, `main` tidak disentuh. **Belum di-merge dan belum di-push; menunggu persetujuan pemilik.** Setelah
-setuju: `git merge --ff-only claude/t3-2-pane-spawn-aed3a3`, push, arsipkan sesinya, `git worktree remove
-.claude/worktrees/t3-2-pane-spawn-aed3a3`, `git branch -d claude/t3-2-pane-spawn-aed3a3`.
+**T3.2 sudah di-merge ke main dan di-push (2026-10-23)** (`pane_spawn` + audit + worktree + uji alur B, D-024). MVP
+(alur B) berjalan; yang belum hanya bagian Codex (lihat di bawah).
 
 **Belum terbukti (uji ulang):**
 - Codex sebagai peninjau di alur B, `tool_timeout_sec=330` di Codex (kartu dijawab > 60 s), dan Codex sebagai pemanggil
