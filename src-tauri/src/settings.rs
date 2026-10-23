@@ -21,6 +21,10 @@ pub const FONT_SIZE: std::ops::RangeInclusive<u32> = 10..=24;
 pub const LINE_HEIGHT: std::ops::RangeInclusive<f64> = 1.0..=2.0;
 pub const SCROLLBACK: std::ops::RangeInclusive<u32> = 0..=100_000;
 const FONT_FAMILY_MAX: usize = 200;
+/// Prompt library (D-032): at most this many prompts, names and texts at most this many characters.
+pub const PROMPTS_MAX: usize = 100;
+pub const PROMPT_NAME_MAX: usize = 80;
+pub const PROMPT_TEXT_MAX: usize = 10_000;
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -31,6 +35,15 @@ pub struct Settings {
     pub peer_default: bool,
     pub limits: LimitValues,
     pub terminal: Terminal,
+    /// Prompt library (D-032), pasted into a pane by the person; a patch replaces the whole list.
+    pub prompts: Vec<Prompt>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Prompt {
+    pub name: String,
+    pub text: String,
 }
 
 /// MCP-TOOLS "Batas bawaan"; ranges are [`Limit::range`].
@@ -174,7 +187,7 @@ impl Settings {
                 t.scrollback
             ));
         }
-        Ok(())
+        validate_prompts(&self.prompts)
     }
 
     /// `patch` is a partial `Settings` object; unknown keys and wrong types are refused, nothing changes on error.
@@ -186,6 +199,46 @@ impl Settings {
         next.validate()?;
         Ok(next)
     }
+}
+
+/// Names: 1–[`PROMPT_NAME_MAX`] characters, no control characters, unique ignoring case. Texts: 1–[`PROMPT_TEXT_MAX`]
+/// characters, control characters only as tab and line breaks, so a prompt cannot carry an escape sequence (one could
+/// end bracketed paste early and run the rest).
+fn validate_prompts(prompts: &[Prompt]) -> Result<(), String> {
+    if prompts.len() > PROMPTS_MAX {
+        return Err(format!(
+            "Pustaka prompt paling banyak {PROMPTS_MAX} prompt."
+        ));
+    }
+    let mut seen = std::collections::HashSet::new();
+    for p in prompts {
+        let name = p.name.trim();
+        if name.is_empty()
+            || name.chars().count() > PROMPT_NAME_MAX
+            || name.chars().any(char::is_control)
+        {
+            return Err(format!(
+                "Nama prompt harus berisi 1–{PROMPT_NAME_MAX} karakter, satu baris."
+            ));
+        }
+        if !seen.insert(name.to_lowercase()) {
+            return Err(format!("Nama prompt \"{name}\" sudah dipakai."));
+        }
+        if p.text.trim().is_empty() || p.text.chars().count() > PROMPT_TEXT_MAX {
+            return Err(format!(
+                "Teks prompt \"{name}\" harus berisi 1–{PROMPT_TEXT_MAX} karakter."
+            ));
+        }
+        if p.text
+            .chars()
+            .any(|c| c.is_control() && !matches!(c, '\t' | '\n' | '\r'))
+        {
+            return Err(format!(
+                "Teks prompt \"{name}\" berisi karakter kontrol; hanya tab dan baris baru yang boleh."
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn merge(dst: &mut Value, patch: Value, at: &str) -> Result<(), String> {
@@ -371,7 +424,8 @@ mod tests {
                     "font_family": "\"SF Mono\", Menlo, monospace",
                     "font_size": 13, "line_height": 1.2, "scrollback": 10000,
                     "theme": "system", "screen_reader": false
-                }
+                },
+                "prompts": []
             }))
         );
         assert_eq!(s.validate(), Ok(()));
@@ -423,6 +477,83 @@ mod tests {
             Terminal::default().font_family,
             "untouched keys stay"
         );
+    }
+
+    #[test]
+    fn prompt_library_is_validated() {
+        let s = Settings::default();
+        let refused = |prompts: Value| {
+            s.patched(json!({ "prompts": prompts }))
+                .err()
+                .unwrap_or_default()
+        };
+        let p = |name: &str, text: &str| json!({"name": name, "text": text});
+
+        let ok_list = ok(s.patched(json!({"prompts": [p("Review", "Tinjau diff ini.\n\tSingkat."), p("Tes", "pnpm test")]})));
+        assert_eq!(ok_list.prompts.len(), 2);
+        assert_eq!(
+            ok_list.prompts[1],
+            Prompt {
+                name: "Tes".into(),
+                text: "pnpm test".into()
+            }
+        );
+        // A patch replaces the list: deleting one is sending the rest.
+        assert_eq!(
+            ok(ok_list.patched(json!({"prompts": [p("Tes", "x")]})))
+                .prompts
+                .len(),
+            1
+        );
+
+        assert!(refused(json!([p(" ", "x")])).starts_with("Nama prompt"));
+        assert!(refused(json!([p("a\nb", "x")])).starts_with("Nama prompt"));
+        assert!(
+            refused(json!([p(&"n".repeat(PROMPT_NAME_MAX + 1), "x")])).starts_with("Nama prompt")
+        );
+        assert!(
+            ok(s.patched(json!({"prompts": [p(&"é".repeat(PROMPT_NAME_MAX), "x")]})))
+                .prompts
+                .len()
+                == 1,
+            "characters, not bytes"
+        );
+        assert_eq!(
+            refused(json!([p("Review", "a"), p(" review ", "b")])),
+            "Nama prompt \"review\" sudah dipakai."
+        );
+        assert!(refused(json!([p("a", " \n ")])).starts_with("Teks prompt \"a\""));
+        assert!(refused(json!([p("a", &"x".repeat(PROMPT_TEXT_MAX + 1))])).contains("1–10000"));
+        assert!(
+            ok(s.patched(json!({"prompts": [p("a", &"x".repeat(PROMPT_TEXT_MAX))]})))
+                .prompts
+                .len()
+                == 1
+        );
+        // ESC would let a prompt end bracketed paste and press Enter by itself.
+        assert!(refused(json!([p("a", "x\u{1b}[201~\r")])).contains("karakter kontrol"));
+        assert!(refused(json!([p("a", "x\u{7}")])).contains("karakter kontrol"));
+        let many: Vec<Value> = (0..=PROMPTS_MAX)
+            .map(|i| p(&format!("p{i}"), "x"))
+            .collect();
+        assert!(refused(json!(many)).contains("paling banyak 100"));
+        assert!(
+            refused(json!([{"name": "a", "text": "x", "args": ["--yolo"]}])).starts_with("Nilai")
+        );
+        assert!(refused(json!([{"name": "a"}])).starts_with("Nilai"));
+        assert!(refused(json!({"name": "a", "text": "x"})).starts_with("Nilai"));
+
+        // A file edited by hand with a bad prompt is refused like any other bad value.
+        let tmp = Tmp::new("prompts");
+        ok(fs::create_dir_all(&tmp.0));
+        let path = tmp.0.join(FILE);
+        ok(fs::write(
+            &path,
+            r#"{"prompts": [{"name": "a", "text": "\u001b"}]}"#,
+        ));
+        let (s, warn) = load(&path);
+        assert_eq!(s, Settings::default());
+        assert!(warn.is_some_and(|w| w.contains("karakter kontrol")));
     }
 
     #[test]

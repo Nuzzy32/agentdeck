@@ -1,0 +1,84 @@
+/* Prompt palette, UI-UX §4.8 (D-032). Fields, buttons and the folder row reuse the launcher's classes. */
+.palette {
+  width: 520px;
+  max-width: calc(100vw - 32px);
+}
+.palette-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.palette-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-top: 4px;
+}
+.palette-label {
+  font-size: var(--text-label-lg);
+  font-weight: 600;
+}
+.palette-target {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--text-label);
+}
+.palette-list {
+  display: flex;
+  flex-direction: column;
+  max-height: 240px;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+.palette-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.palette-item {
+  display: flex;
+  flex: 1;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  height: 28px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--radius);
+  background: none;
+  color: var(--fg);
+  text-align: left;
+  cursor: pointer;
+}
+.palette-item:hover:not(:disabled),
+.palette-item:focus-visible {
+  background: var(--surface);
+}
+.palette-item:disabled {
+  cursor: default;
+  color: var(--faint);
+}
+.palette-name {
+  flex: none;
+  max-width: 50%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.palette-preview {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--text-label-lg);
+}
+.palette-note {
+  margin: 0;
+  padding: 0 8px;
+  font-size: var(--text-label-lg);
+}

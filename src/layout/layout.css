@@ -210,9 +210,13 @@
   padding: 3px 8px;
   color: var(--faint);
 }
-.sidebar-settings {
+.sidebar-settings,
+.sidebar-prompts {
   margin-top: auto;
   color: var(--muted);
+}
+.sidebar-prompts + .sidebar-settings {
+  margin-top: 0;
 }
 
 /* Status dot, UI-UX §3: shape carries the meaning, colour reinforces it. */

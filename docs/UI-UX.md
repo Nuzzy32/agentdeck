@@ -165,6 +165,18 @@ Di tengah jendela: judul "Mulai kerja", tiga tombol besar **Shell**, **Claude Co
 dua baris penjelasan ("Buka beberapa agen berdampingan. Agen bisa saling memberi tugas setelah kamu mengizinkannya di
 Settings."), dan tautan ke Settings › Kolaborasi.
 
+### 4.8 Palet prompt dan preset sesi (`⌘P`, D-032)
+Modal 520 px, dibuka `⌘P` atau baris **Prompt** di kaki sidebar. Kolom cari menyaring dua daftar sekaligus.
+- **Prompt**: nama + baris pertama teks. Enter/klik menempel teks ke pane yang fokus seperti `⌘V` (bracketed paste bila
+  program memintanya, ditandai ketikan orang), baris baru di ujung dibuang, **tanpa Enter**. Judul daftar menyebut
+  tujuannya ("ditempel ke p2 Shell, tanpa Enter"); tanpa pane berjalan yang fokus, baris prompt redup. Tombol
+  **Prompt baru**, **Ubah**, **Hapus**; editor: Nama, Teks (mono, `⌘Enter` menyimpan), galat ditolak di tempat.
+- **Preset sesi**: **Solo** (Claude Code) dan **Pair** (Claude Code kiri, Codex kanan). Memilih preset meminta folder
+  (bawaan folder pane aktif, 5 folder terakhir, Pilih…), lalu **Buka** membuat workspace baru. Galat peluncuran
+  (agen belum terpasang) tampil di tempat dengan perintah pasang; tidak ada pane setengah jadi yang tertinggal.
+- Panah atas/bawah berpindah antara kolom cari dan baris; Enter di kolom cari memilih baris pertama; `Esc` kembali ke
+  daftar, lalu menutup.
+
 ## 5. Galat dan umpan balik
 
 | Situasi | Di mana | Teks |
@@ -243,6 +255,7 @@ Ukuran 13 px menyimpang dari saran web 16 px karena ini aplikasi desktop macOS y
 | Cari di pane | `⌘F` |
 | Ukuran font | `⌘=` / `⌘-` / `⌘0` |
 | Settings | `⌘,` |
+| Palet prompt dan preset | `⌘P` |
 
 Semua pintasan memakai `⌘`, jadi tidak bentrok dengan `Ctrl`/`⌥` yang dipakai program di terminal. Saat fokus di
 terminal, `⌘C`/`⌘V` menyalin/menempel; tempelan orang memakai bracketed paste xterm.js seperti biasa.
