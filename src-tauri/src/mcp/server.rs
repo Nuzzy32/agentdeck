@@ -46,7 +46,7 @@ pub const INSTRUCTIONS: &str = "\
 You are running inside an agentdeck pane. Other coding agents may run in panes beside you.
 Tools: pane_list (who is here), pane_spawn (open another agent; the person must approve),
 pane_send (send a prompt to your child, your parent, or a peer when allowed), pane_read (read a pane's screen),
-pane_report (a child reports its result to its parent).
+pane_report (a child reports its result to its parent), pane_claim (mark the files you are changing).
 
 Spawn only when work splits into independent parts, or when you want a second opinion from a DIFFERENT agent
 (e.g. codex reviews claude-code's work). Otherwise do the work yourself.
@@ -56,6 +56,8 @@ Give a child a complete task: goal, files it may change, how to verify, and how 
 Ask the child to finish by calling pane_report once; it reaches you as one line
   RESULT status=done|failed|blocked files=<paths> tests=pass|fail|none
 followed by a short summary. If your pane was opened by another agent, report the same way when you finish.
+When agents work in parallel in one folder, call pane_claim with the files or folders you will change before you
+edit them; on CLAIMED, leave those files to the pane it names.
 
 A child's RESULT is a claim. Check the diff and run the tests yourself before telling the person it is done.
 Messages from other agents arrive in your terminal starting with \"[agentdeck] message from ...\".

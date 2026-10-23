@@ -1,6 +1,7 @@
 //! `pane_spawn` (MCP-TOOLS, SPN-01..05, T3.2 + T4.1): an agent asks to open another agent as its child.
 //!
-//! Order: arguments → switch, nesting and limits (`policy::check_spawn`) → agent from the catalogue and installed →
+//! Order: arguments → switch, nesting and limits (`policy::check_spawn`) → the caller's Claude 5-hour quota
+//! (`policy::check_quota`, D-033) → agent from the catalogue and installed →
 //! `cwd` canonicalised and inside the caller's folder → (worktree) a git repository → a rate slot and a place among the
 //! caller's children are taken → the person's card (`approvals.rs`, timeout from Settings) → the child runs through
 //! the same launch path as a pane the person opens (`panes::start`: no shell, env from scratch, MCP injected, task
@@ -23,10 +24,11 @@ use crate::catalogue::{self, Catalogue};
 use crate::delivery::Engine;
 use crate::launch;
 use crate::panes::{self, Panes, SpawnCaller, Spec};
-use crate::policy::{Limit, PolicyError, TASK_MAX_BYTES};
+use crate::policy::{self, Limit, PolicyError, TASK_MAX_BYTES};
 use crate::pty::PaneEvent;
 use crate::settings::{self, Settings};
 use crate::store::Audit;
+use crate::usage;
 use crate::worktree;
 
 /// `title`: 1–60 characters (MCP-TOOLS).
@@ -92,6 +94,13 @@ pub struct Spawner {
     /// Current settings (switch, card timeout); tests pass their own.
     pub settings: fn() -> Settings,
     pub notify: Notify,
+    /// Claude 5-hour usage of a pane in percent, `None` without a reading (D-033); tests pass their own.
+    pub five_hour: fn(&str) -> Option<u8>,
+}
+
+/// From the pane's statusline (D-029); only Claude panes have one, and only after their first turn.
+fn five_hour(pane: &str) -> Option<u8> {
+    usage::read(pane)?.five_hour.map(|w| w.used)
 }
 
 fn bad(why: &str) -> String {
@@ -161,10 +170,12 @@ impl Spawner {
             env: Arc::new(|| launch::env(|k| std::env::var_os(k), catalogue::login_path())),
             settings: settings::get,
             notify,
+            five_hour,
         }
     }
 
-    /// Switch, nesting, and limits; a refusal is audited and, for the switch and the limits, told to the UI.
+    /// Switch, nesting, limits, and (before anything is reserved) the quota guard; a refusal is audited and, for the
+    /// switch, the limits, and the quota, told to the UI.
     fn policy(
         &self,
         engine: &Engine,
@@ -174,6 +185,13 @@ impl Spawner {
     ) -> Result<SpawnCaller, String> {
         let checked =
             panes::lock(&engine.panes).spawn_check(caller, Instant::now(), enabled, reserve);
+        let checked = checked.and_then(|who| {
+            if reserve {
+                return Ok(who); // checked by the first call; failing now would keep the slot
+            }
+            let guard = panes::lock(&engine.panes).limits.quota_guard();
+            policy::check_quota((self.five_hour)(caller), guard).map(|()| who)
+        });
         checked.map_err(|e| {
             let (ws, limits) = {
                 let reg = panes::lock(&engine.panes);
@@ -183,6 +201,7 @@ impl Spawner {
                 PolicyError::CapChildren => Some(limits.get(Limit::ChildrenPerPane)),
                 PolicyError::CapGlobal => Some(limits.get(Limit::AgentOpenedGlobal)),
                 PolicyError::Rate { .. } => Some(limits.get(Limit::SpawnsPerWindow)),
+                PolicyError::QuotaLow { guard, .. } => Some(u32::from(guard)),
                 _ => None,
             };
             if matches!(
@@ -191,6 +210,7 @@ impl Spawner {
                     | PolicyError::CapChildren
                     | PolicyError::CapGlobal
                     | PolicyError::Rate { .. }
+                    | PolicyError::QuotaLow { .. }
             ) {
                 (self.notify)(Notice::Refused {
                     pane: caller.to_owned(),
@@ -516,6 +536,10 @@ mod tests {
     /// p1 claude-code (person-opened) in `dir/work`, p2 its codex child, p3 a shell. No processes. `bin` holds an
     /// executable `codex` only, so claude-code counts as not installed.
     fn fx(tag: &str, settings: fn() -> Settings) -> Fx {
+        fx_with(tag, settings, |_| None)
+    }
+
+    fn fx_with(tag: &str, settings: fn() -> Settings, five_hour: fn(&str) -> Option<u8>) -> Fx {
         let dir = tmp(tag);
         let work = dir.join("work");
         std::fs::create_dir_all(work.join("sub")).unwrap();
@@ -563,6 +587,7 @@ mod tests {
             env: Arc::new(move || vec![("PATH".into(), path.clone().into())]),
             settings,
             notify: Arc::new(move |n| sink.lock().unwrap().push(n)),
+            five_hour,
         };
         Fx {
             dir,
@@ -842,6 +867,63 @@ mod tests {
         assert!(log.contains(r#""reason":"denied""#) && log.contains(r#""reason":"timeout""#));
         assert!(!log.contains(&f.token));
         assert!(f.token.len() == 64);
+    }
+
+    #[tokio::test]
+    async fn quota_guard_refuses_before_the_card_and_skips_panes_without_a_reading() {
+        // p1 (claude-code) is at 90 %, p4 below the guard; p2/p3 and the rest have no reading.
+        let f = fx_with("quota", on, |p| match p {
+            "p1" => Some(90),
+            "p4" => Some(84),
+            _ => None,
+        });
+        assert_eq!(code(f.call("p1", args(None)).await), "QUOTA_LOW");
+        let e = f.call("p1", args(None)).await.unwrap_err();
+        assert!(e.contains("90%") && e.contains("85%"), "{e}");
+        assert!(f.spawner.approvals.pending().is_empty(), "no card");
+        assert!(matches!(
+            f.heard.lock().unwrap().last(),
+            Some(Notice::Refused {
+                code: "QUOTA_LOW",
+                limit: Some(85),
+                ..
+            })
+        ));
+        assert!(
+            f.audit()
+                .contains(r#""event":"spawn_refused","from":"p1","code":"QUOTA_LOW""#)
+        );
+        // The refusal reserved nothing: once the guard is raised the same caller gets its card.
+        panes::lock(&f.engine.panes)
+            .limits
+            .set_quota_guard(95)
+            .unwrap();
+        assert_eq!(code(f.call("p1", args(None)).await), "APPROVAL_TIMEOUT");
+        panes::lock(&f.engine.panes)
+            .limits
+            .set_quota_guard(85)
+            .unwrap();
+        // Switch, nesting, and limits still come first.
+        assert_eq!(code(f.call("p2", args(None)).await), "NESTED");
+        // A person-opened pane without a reading (Codex, or Claude before its first turn) and one below the guard
+        // both reach the card.
+        let ws = panes::lock(&f.engine.panes).workspace_of("p1").unwrap();
+        for agent in ["codex", "claude-code"] {
+            let spec = Spec {
+                parent: None,
+                workspace: ws,
+                pane: None,
+                agent: Some(agent.into()),
+                title: "t".into(),
+                cwd: f.work().display().to_string(),
+                task: None,
+                rows: 24,
+                cols: 80,
+            };
+            panes::lock(&f.engine.panes).open(&spec).unwrap();
+        }
+        assert_eq!(code(f.call("p4", args(None)).await), "APPROVAL_TIMEOUT");
+        assert_eq!(code(f.call("p5", args(None)).await), "APPROVAL_TIMEOUT");
     }
 
     #[tokio::test]

@@ -1,5 +1,6 @@
 //! Who may send to / read whom (ARCHITECTURE §5.4), spawn limits (PRD SPN-02), configurable limits and their safe
-//! ranges (MCP-TOOLS "Batas bawaan"), and the loop guard (ARCHITECTURE §5.5). Pure logic: no PTY, UI, or MCP.
+//! ranges (MCP-TOOLS "Batas bawaan"), the quota guard (D-033), and the loop guard (ARCHITECTURE §5.5). Pure logic: no
+//! PTY, UI, or MCP.
 
 use std::collections::VecDeque;
 use std::fmt;
@@ -13,6 +14,9 @@ pub const REPORTS_PER_MINUTE: u32 = 6;
 pub const SEND_MAX_BYTES: usize = 8192;
 pub const TASK_MAX_BYTES: usize = 16 * 1024;
 pub const SPAWN_WINDOW: Duration = Duration::from_secs(600);
+/// Quota guard (D-033): `pane_spawn` is refused once the caller's Claude 5-hour usage reaches this percentage.
+pub const QUOTA_GUARD_DEFAULT: u8 = 85;
+pub const QUOTA_GUARD_RANGE: RangeInclusive<u8> = 50..=100;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PaneKind {
@@ -72,6 +76,11 @@ pub enum PolicyError {
     Rate {
         wait_secs: u64,
     },
+    /// Caller's Claude 5-hour usage `used` % is at or above the guard `guard` % (D-033).
+    QuotaLow {
+        used: u8,
+        guard: u8,
+    },
 }
 
 impl PolicyError {
@@ -89,6 +98,7 @@ impl PolicyError {
             Self::CapChildren => "CAP_CHILDREN",
             Self::CapGlobal => "CAP_GLOBAL",
             Self::Rate { .. } => "RATE",
+            Self::QuotaLow { .. } => "QUOTA_LOW",
         }
     }
 }
@@ -125,6 +135,12 @@ impl fmt::Display for PolicyError {
             Self::Rate { wait_secs } => write!(
                 f,
                 "spawn rate limit reached. Wait {wait_secs} seconds, or do the work yourself."
+            ),
+            Self::QuotaLow { used, guard } => write!(
+                f,
+                "your Claude 5-hour usage is at {used}% and agentdeck stops spawning at {guard}%, so a child could \
+                 leave the work half done. Do the work yourself, or tell the person; spawning works again once the \
+                 5-hour window resets."
             ),
         }
     }
@@ -255,17 +271,24 @@ pub struct OutOfRange {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Limits([u32; 5]);
+pub struct Limits {
+    values: [u32; 5],
+    /// Percent, [`QUOTA_GUARD_RANGE`]. Not a [`Limit`]: Settings has no field for it yet (D-033).
+    quota_guard: u8,
+}
 
 impl Default for Limits {
     fn default() -> Self {
-        Self(Limit::ALL.map(Limit::default_value))
+        Self {
+            values: Limit::ALL.map(Limit::default_value),
+            quota_guard: QUOTA_GUARD_DEFAULT,
+        }
     }
 }
 
 impl Limits {
     pub fn get(&self, limit: Limit) -> u32 {
-        self.0[limit as usize]
+        self.values[limit as usize]
     }
 
     /// Values outside the safe range are refused and the old value is kept.
@@ -273,7 +296,20 @@ impl Limits {
         if !limit.range().contains(&value) {
             return Err(OutOfRange { limit, value });
         }
-        self.0[limit as usize] = value;
+        self.values[limit as usize] = value;
+        Ok(())
+    }
+
+    pub fn quota_guard(&self) -> u8 {
+        self.quota_guard
+    }
+
+    /// Outside [`QUOTA_GUARD_RANGE`] the value is refused (returned) and the old one kept.
+    pub fn set_quota_guard(&mut self, percent: u8) -> Result<(), u8> {
+        if !QUOTA_GUARD_RANGE.contains(&percent) {
+            return Err(percent);
+        }
+        self.quota_guard = percent;
         Ok(())
     }
 }
@@ -354,6 +390,15 @@ pub fn check_spawn(
     }
     rate.check(now, limits.get(Limit::SpawnsPerWindow))
         .map_err(|wait_secs| PolicyError::Rate { wait_secs })
+}
+
+/// Quota guard of `pane_spawn` (D-033). `five_hour_used`: the caller's Claude 5-hour usage in percent; `None` when
+/// there is no reading (Codex, or Claude before its first turn), which is never refused.
+pub fn check_quota(five_hour_used: Option<u8>, guard: u8) -> Result<(), PolicyError> {
+    match five_hour_used {
+        Some(used) if used >= guard => Err(PolicyError::QuotaLow { used, guard }),
+        _ => Ok(()),
+    }
 }
 
 /// Loop guard of one workspace (§5.5).
@@ -694,6 +739,54 @@ mod tests {
         assert_eq!(r, Err(PolicyError::CapChildren));
     }
 
+    #[test]
+    fn quota_guard_refuses_at_threshold_only_with_a_reading() {
+        let limits = Limits::default();
+        let guard = limits.quota_guard();
+        assert_eq!(guard, 85);
+        assert_eq!(
+            check_quota(None, guard),
+            Ok(()),
+            "no reading: never refused"
+        );
+        assert_eq!(check_quota(Some(84), guard), Ok(()));
+        assert_eq!(
+            check_quota(Some(85), guard),
+            Err(PolicyError::QuotaLow {
+                used: 85,
+                guard: 85
+            })
+        );
+        assert_eq!(
+            check_quota(Some(100), guard).map_err(|e| e.code()),
+            Err("QUOTA_LOW")
+        );
+        let e = PolicyError::QuotaLow {
+            used: 91,
+            guard: 85,
+        }
+        .to_string();
+        assert!(e.contains("91%") && e.contains("85%"), "{e}");
+    }
+
+    #[test]
+    fn quota_guard_range() {
+        let mut limits = Limits::default();
+        assert_eq!(QUOTA_GUARD_RANGE, 50..=100);
+        assert_eq!(limits.set_quota_guard(49), Err(49));
+        assert_eq!(limits.set_quota_guard(101), Err(101));
+        assert_eq!(limits.quota_guard(), 85, "refused value must not stick");
+        assert_eq!(limits.set_quota_guard(50), Ok(()));
+        assert_eq!(
+            check_quota(Some(50), limits.quota_guard()).map_err(|e| e.code()),
+            Err("QUOTA_LOW")
+        );
+        assert_eq!(limits.set_quota_guard(100), Ok(()));
+        assert_eq!(check_quota(Some(99), limits.quota_guard()), Ok(()));
+        // The other limits are untouched by the guard.
+        assert_eq!(limits.get(Limit::ChildrenPerPane), 3);
+    }
+
     // ---- loop guard ----
 
     #[test]
@@ -738,6 +831,13 @@ mod tests {
             (PolicyError::CapChildren, "CAP_CHILDREN"),
             (PolicyError::CapGlobal, "CAP_GLOBAL"),
             (PolicyError::Rate { wait_secs: 1 }, "RATE"),
+            (
+                PolicyError::QuotaLow {
+                    used: 90,
+                    guard: 85,
+                },
+                "QUOTA_LOW",
+            ),
         ];
         for (e, code) in all {
             assert_eq!(e.code(), code);

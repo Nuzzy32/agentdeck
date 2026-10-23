@@ -15,14 +15,14 @@ semua agen.
 | Identitas | Pane pemanggil ditentukan dari token. Tidak ada argumen yang memilih pengirim. |
 
 ### Instructions (dikirim di `initialize`)
-Terbukti dibaca kedua agen (S8). Teks disempurnakan di T2.2, T4.2, dan T3.2 (sama persis dengan `INSTRUCTIONS` di
+Terbukti dibaca kedua agen (S8). Teks disempurnakan di T2.2, T4.2, T3.2, dan D-033 (sama persis dengan `INSTRUCTIONS` di
 `mcp/server.rs`):
 
 ```
 You are running inside an agentdeck pane. Other coding agents may run in panes beside you.
 Tools: pane_list (who is here), pane_spawn (open another agent; the person must approve),
 pane_send (send a prompt to your child, your parent, or a peer when allowed), pane_read (read a pane's screen),
-pane_report (a child reports its result to its parent).
+pane_report (a child reports its result to its parent), pane_claim (mark the files you are changing).
 
 Spawn only when work splits into independent parts, or when you want a second opinion from a DIFFERENT agent
 (e.g. codex reviews claude-code's work). Otherwise do the work yourself.
@@ -32,6 +32,8 @@ Give a child a complete task: goal, files it may change, how to verify, and how 
 Ask the child to finish by calling pane_report once; it reaches you as one line
   RESULT status=done|failed|blocked files=<paths> tests=pass|fail|none
 followed by a short summary. If your pane was opened by another agent, report the same way when you finish.
+When agents work in parallel in one folder, call pane_claim with the files or folders you will change before you
+edit them; on CLAIMED, leave those files to the pane it names.
 
 A child's RESULT is a claim. Check the diff and run the tests yourself before telling the person it is done.
 Messages from other agents arrive in your terminal starting with "[agentdeck] message from ...".
@@ -45,6 +47,7 @@ Only the person closes panes. If a tool is refused, read the error code and foll
 |---|---|
 | `pane_list`, `pane_read` | `readOnlyHint: true` |
 | `pane_spawn`, `pane_send`, `pane_report` | `readOnlyHint: false`, `destructiveHint: false`, `openWorldHint: false`, `idempotentHint: false` |
+| `pane_claim` | sama, kecuali `idempotentHint: true` (D-033) |
 
 ### Bentuk galat
 Galat dikembalikan sebagai hasil tool dengan `isError: true` dan teks `CODE: penjelasan. what to do.` (bukan galat
@@ -62,14 +65,15 @@ Daftar pane di workspace pemanggil.
 {
   "you": "p1",
   "panes": [
-    {"id": "p1", "title": "feat: auth", "agent": "claude-code", "status": "idle",    "relation": "you",   "can_send": false, "can_read": false},
-    {"id": "p2", "title": "review: auth", "agent": "codex",     "status": "working", "relation": "child", "can_send": true,  "can_read": true},
-    {"id": "p3", "title": "zsh",           "agent": null,        "status": "unknown", "relation": "shell", "can_send": false, "can_read": false}
+    {"id": "p1", "title": "feat: auth", "agent": "claude-code", "status": "idle",    "relation": "you",   "can_send": false, "can_read": false, "claims": []},
+    {"id": "p2", "title": "review: auth", "agent": "codex",     "status": "working", "relation": "child", "can_send": true,  "can_read": true,  "claims": ["/abs/repo/src/auth"]},
+    {"id": "p3", "title": "zsh",           "agent": null,        "status": "unknown", "relation": "shell", "can_send": false, "can_read": false, "claims": []}
   ],
   "peer_messaging": false
 }
 ```
-`relation`: `you`, `parent`, `child`, `peer`, `shell`. `status`: lihat ARCHITECTURE §6.
+`relation`: `you`, `parent`, `child`, `peer`, `shell`. `status`: lihat ARCHITECTURE §6. `claims`: path absolut dari
+`pane_claim` pane itu (D-033).
 
 ---
 
@@ -102,14 +106,17 @@ Hasil anak datang lewat `pane_report` (atau `pane_send` ke `"parent"`).
 | `CAP_CHILDREN` | Sudah 3 anak hidup. | Tunggu anak selesai dan ditutup orang. |
 | `CAP_GLOBAL` | Sudah 8 pane agen dibuka agen. | Minta orang menutup pane yang tidak dipakai. |
 | `RATE` | 5 spawn per 10 menit terpakai. Pesan menyebut detik tunggu. | Tunggu, atau kerjakan sendiri. |
+| `QUOTA_LOW` | Kuota 5 jam Claude pemanggil ≥ ambang (bawaan 85%, D-033). Pesan menyebut persen terpakai dan ambang. | Kerjakan sendiri atau beri tahu orang; spawn bisa lagi setelah jendela 5 jam direset. |
 | `UNKNOWN_AGENT` | id tidak ada di katalog. Teks galat menyebut id yang tersedia. | Pakai salah satu id dari teks galat. |
 | `AGENT_NOT_INSTALLED` | CLI tidak ditemukan di mesin. | Pilih agen lain atau beri tahu orang. |
 | `CWD_OUTSIDE` | `cwd` di luar folder kerja pemanggil. | Perbaiki path. |
 | `SPAWN_FAILED` | Kartu disetujui, tetapi agen atau worktree gagal dibuat (D-024). | Beri tahu orang. |
 | `BAD_ARGS` | Argumen tidak valid (panjang, field asing, `cwd` relatif/berisi `..`/tidak ada, `worktree` di luar repo git). | Perbaiki argumen. |
 
-Pemanggil yang sendiri dibuka agen, sakelar mati, dan batas diperiksa sebelum kartu; agen yang tidak dikenal/terpasang
-dan `cwd` juga, sehingga orang tidak pernah ditanya untuk spawn yang pasti gagal. Rate dihitung per aplikasi saat kartu
+Pemanggil yang sendiri dibuka agen, sakelar mati, batas, dan kuota diperiksa sebelum kartu; agen yang tidak
+dikenal/terpasang dan `cwd` juga, sehingga orang tidak pernah ditanya untuk spawn yang pasti gagal. Kuota dibaca dari
+statusline pane pemanggil (D-029); pane tanpa bacaan (Codex, atau Claude sebelum giliran pertama) tidak ditolak karena
+kuota. Rate dihitung per aplikasi saat kartu
 ditampilkan; kartu yang masih menunggu dihitung sebagai anak hidup.
 
 ---
@@ -171,6 +178,29 @@ salinannya untuk ditampilkan di header pane anak. Galat: `NO_PARENT`, `REPORT_RA
 
 ---
 
+## `pane_claim` (P1, D-033)
+Menandai berkas/folder yang sedang diubah pemanggil, agar agen lain di workspace yang sama (mis. dua anak paralel)
+tidak mengubahnya juga. Penanda kerja sama: agentdeck tidak memblokir penulisan.
+
+**Argumen:**
+| Nama | Tipe | Wajib | Aturan |
+|---|---|---|---|
+| `paths` | array string | ya | 0–10 path relatif terhadap `cwd` pemanggil, masing-masing 1–1024 byte tanpa karakter kontrol. Tanpa path absolut atau `..`; setelah symlink diurai tetap di dalam `cwd`. `"."` = seluruh folder. Boleh belum ada. |
+
+Tidak ada argumen lain (perintah, flag, env, atau pane lain). Setiap panggilan **mengganti** klaim pemanggil; `[]`
+melepas semuanya. Klaim juga dilepas saat proses pemanggil keluar atau panenya ditutup.
+
+**Hasil:** `{"claims": ["/abs/repo/src/auth", "/abs/repo/docs/AUTH.md"]}` (path absolut, tanpa duplikat).
+
+**Galat:**
+| Kode | Arti | Saran untuk agen |
+|---|---|---|
+| `CLAIMED` | Sebuah path sama dengan, berada di dalam, atau memuat klaim pane hidup lain di workspace yang sama. Pesan menyebut path, klaim lawan, dan id pane pemiliknya. Tidak ada klaim yang diubah. | Biarkan berkas itu untuk pane tersebut, atau minta induk membagi ulang pekerjaan. |
+| `PATH_OUTSIDE` | Path absolut, berisi `..`, keluar lewat symlink (termasuk symlink gantung), atau folder pemanggil sudah tidak ada. | Pakai path relatif di dalam folder sendiri. |
+| `BAD_ARGS` | Lebih dari 10 path, path kosong/terlalu panjang/berkarakter kontrol, field asing. | Perbaiki argumen. |
+
+---
+
 ## Batas bawaan (bisa diatur di Settings dalam rentang aman)
 | Batas | Bawaan | Rentang |
 |---|---|---|
@@ -182,3 +212,5 @@ salinannya untuk ditampilkan di header pane anak. Galat: `NO_PARENT`, `REPORT_RA
 | Pesan tertahan per tujuan | 5 | tetap |
 | `pane_read` per menit per pemanggil | 30 | tetap |
 | `pane_report` per menit per pemanggil (P1) | 6 | tetap |
+| Ambang kuota 5 jam Claude untuk `pane_spawn` (D-033) | 85% | 50–100%; belum ada di Settings |
+| Path per `pane_claim` (D-033) | 10 | tetap |

@@ -1201,6 +1201,7 @@ fn pane_spawn_card_child_report_and_worktrees() {
         env: Arc::new(move || launch::env(|k| std::env::var_os(k), &child_path)),
         settings: on,
         notify: Arc::new(move |n| sink.lock().unwrap().push(n)),
+        five_hour: |_| None,
     };
     let port = rt
         .block_on(server::serve_with(

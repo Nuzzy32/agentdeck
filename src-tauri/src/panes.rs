@@ -21,6 +21,7 @@ use crate::delivery::{
 };
 use crate::launch::{self, LaunchError, Mcp};
 use crate::layout::Layout;
+use crate::mcp::claim;
 use crate::mcp::report::Report;
 use crate::mcp::server::McpStatus;
 use crate::policy::{
@@ -70,6 +71,8 @@ struct Entry {
     worktree: Option<Worktree>,
     /// Conversation of a restored pane (`layout.json`), resumed once on its next run (D-030).
     session: Option<String>,
+    /// `pane_claim` (D-033): absolute paths, released when the process exits or the pane closes.
+    claims: Vec<PathBuf>,
 }
 
 impl Entry {
@@ -137,6 +140,8 @@ pub struct PaneInfo {
     pub relation: &'static str,
     pub can_send: bool,
     pub can_read: bool,
+    /// Absolute paths this pane claimed with `pane_claim` (D-033).
+    pub claims: Vec<String>,
 }
 
 /// `pane_list` result (MCP-TOOLS).
@@ -338,6 +343,8 @@ impl Registry {
                 e.status = None;
                 e.started = now;
                 e.exited = false;
+                // The old process may not have exited (its event is now ignored): its claims go with it.
+                e.claims.clear();
                 (id.clone(), e.generation, e.pty.take(), resume)
             }
             None => {
@@ -362,6 +369,7 @@ impl Registry {
                     report: None,
                     worktree: None,
                     session: None,
+                    claims: Vec::new(),
                 });
                 (id, 0, None, None)
             }
@@ -425,6 +433,7 @@ impl Registry {
             }
             PaneEvent::Exited { .. } => {
                 e.exited = true;
+                e.claims.clear();
                 self.tokens.revoke(id);
             }
         }
@@ -477,6 +486,7 @@ impl Registry {
                     report: None,
                     worktree: p.worktree.clone(),
                     session: p.session.clone(),
+                    claims: Vec::new(),
                 });
             }
         }
@@ -575,6 +585,29 @@ impl Registry {
         }
     }
 
+    /// Folder of pane `id`, which its `pane_claim` paths are relative to.
+    pub fn cwd_of(&self, id: &str) -> Option<PathBuf> {
+        Some(self.panes.iter().find(|e| e.id == id)?.cwd.clone())
+    }
+
+    /// `pane_claim` (D-033): `paths` (from `claim::resolve`) replace the claims of `id`, unless one overlaps a claim of
+    /// another live pane in its workspace (`CLAIMED`). Checked and set under the one lock, so two claims never race.
+    pub fn set_claims(&mut self, id: &str, paths: Vec<PathBuf>) -> Result<(), String> {
+        let ws = self
+            .workspace_of(id)
+            .ok_or("UNKNOWN_PANE: your pane is gone. Tell the person.")?;
+        let others = self
+            .panes
+            .iter()
+            .filter(|e| e.workspace == ws && e.id != id && !e.exited)
+            .map(|e| (e.id.as_str(), e.claims.as_slice()));
+        claim::conflict(&paths, others)?;
+        if let Some(e) = self.entry(id) {
+            e.claims = paths;
+        }
+        Ok(())
+    }
+
     /// `pane_report_last`.
     pub fn report(&self, id: &str) -> Option<Report> {
         self.panes.iter().find(|e| e.id == id)?.report.clone()
@@ -603,6 +636,7 @@ impl Registry {
                     relation: relation.as_str(),
                     can_send: policy::can_send(me, p, peer).is_ok(),
                     can_read: policy::can_read(me, p, peer).is_ok(),
+                    claims: e.claims.iter().map(|c| c.display().to_string()).collect(),
                 })
             })
             .collect();
@@ -1248,6 +1282,66 @@ mod tests {
             assert_eq!(r.open(&spec).unwrap().resume, None);
             assert_eq!(r.session_of("p3"), None);
         }
+    }
+
+    #[test]
+    fn claims_overlap_per_workspace_and_go_on_exit_and_close() {
+        let mut r = Registry::default();
+        let ws = r.create_workspace();
+        let other = r.create_workspace();
+        for w in [ws, ws, ws, other] {
+            r.open(&spec(w, Some("codex"))).unwrap();
+        }
+        let p = |s: &str| PathBuf::from(s);
+        let claims = |r: &Registry, id: &str| {
+            r.list("p1")
+                .unwrap()
+                .panes
+                .into_iter()
+                .find(|i| i.id == id)
+                .unwrap()
+                .claims
+        };
+        assert_eq!(r.set_claims("p2", vec![p("/w/src")]), Ok(()));
+        // Inside p2's claim, from a sibling: refused, naming p2; nothing of p3's is kept.
+        let e = r
+            .set_claims("p3", vec![p("/w/docs"), p("/w/src/a.rs")])
+            .unwrap_err();
+        assert!(
+            e.starts_with("CLAIMED: ") && e.contains("claimed by p2"),
+            "{e}"
+        );
+        assert!(claims(&r, "p3").is_empty());
+        assert_eq!(r.set_claims("p3", vec![p("/w/docs")]), Ok(()));
+        // Another workspace does not count; a pane may re-claim its own path.
+        assert_eq!(r.set_claims("p4", vec![p("/w/src")]), Ok(()));
+        assert_eq!(r.set_claims("p2", vec![p("/w/src"), p("/w/lib")]), Ok(()));
+        assert_eq!(claims(&r, "p2"), ["/w/src", "/w/lib"]);
+        assert!(r.list("p4").unwrap().panes.iter().all(|i| i.id != "p2"));
+        // Each call replaces; an empty list releases.
+        assert_eq!(r.set_claims("p2", vec![p("/w/lib")]), Ok(()));
+        assert_eq!(r.set_claims("p3", vec![p("/w/src/a.rs")]), Ok(()));
+        assert_eq!(r.set_claims("p2", vec![]), Ok(()));
+        assert!(claims(&r, "p2").is_empty());
+        // Exit releases.
+        assert_eq!(r.set_claims("p2", vec![p("/w/lib")]), Ok(()));
+        assert!(r.set_claims("p1", vec![p("/w")]).is_err());
+        r.event("p2", 0, &exited());
+        assert!(claims(&r, "p2").is_empty());
+        r.close("p3");
+        assert_eq!(r.set_claims("p1", vec![p("/w")]), Ok(()), "close releases");
+        // Run again while still running: the new process starts without the old claims.
+        let again = Spec {
+            pane: Some("p1".into()),
+            ..spec(ws, Some("codex"))
+        };
+        r.open(&again).unwrap();
+        assert!(claims(&r, "p1").is_empty());
+        assert!(
+            r.set_claims("p9", vec![])
+                .unwrap_err()
+                .starts_with("UNKNOWN_PANE: ")
+        );
     }
 
     #[test]

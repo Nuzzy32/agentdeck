@@ -1,5 +1,5 @@
 //! The agent-facing tools (MCP-TOOLS): `pane_list`, `pane_read`, `pane_spawn` (schema only: it waits for the person, so
-//! `server.rs` runs it through `spawn.rs` on the async runtime), `pane_send`, `pane_report`. Arguments are parsed here, not by
+//! `server.rs` runs it through `spawn.rs` on the async runtime), `pane_send`, `pane_report`, `pane_claim`. Arguments are parsed here, not by
 //! rmcp, so a bad argument is a readable `BAD_ARGS` tool error rather than a JSON-RPC error. Every error is
 //! `CODE: explanation. what to do.` and becomes a tool result with `isError: true`.
 
@@ -11,6 +11,7 @@ use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 
+use super::claim::{self, CLAIMS_MAX};
 use super::report::Reports;
 use crate::delivery::Engine;
 use crate::panes;
@@ -138,6 +139,22 @@ pub fn list() -> Vec<Tool> {
             })),
         )
         .with_annotations(sends()),
+        Tool::new(
+            "pane_claim",
+            "Claim the files or folders you are about to change, so another agent in your workspace leaves them \
+             alone. Paths are relative to your folder and must stay inside it; at most 10. Each call replaces your \
+             claims; an empty list releases them, and they end when your pane exits. A path that overlaps another \
+             pane's claim is refused with CLAIMED, naming that pane. pane_list shows every pane's claims.",
+            schema(json!({
+                "type": "object",
+                "properties": {
+                    "paths": {"type": "array", "items": {"type": "string"}, "maxItems": CLAIMS_MAX, "description": "Files or folders relative to your folder, e.g. [\"src/auth/\", \"docs/AUTH.md\"]."}
+                },
+                "required": ["paths"],
+                "additionalProperties": false
+            })),
+        )
+        .with_annotations(sends().idempotent(true)),
     ]
 }
 
@@ -189,10 +206,20 @@ pub fn call(
             let (id, state) = reports.send(engine, caller, args(raw)?)?;
             Ok(json!({"message": id, "state": state}).to_string())
         }
+        "pane_claim" => {
+            let a: claim::Args = args(raw)?;
+            let cwd = panes::lock(&engine.panes)
+                .cwd_of(caller)
+                .ok_or("UNKNOWN_PANE: your pane is gone. Tell the person.")?;
+            let paths = claim::resolve(&cwd, &a.paths)?;
+            panes::lock(&engine.panes).set_claims(caller, paths.clone())?;
+            Ok(json!({"claims": paths}).to_string())
+        }
         // Served by `spawn.rs`; only a server started without a spawner (tests) gets here.
         "pane_spawn" => Err(PolicyError::SpawnOff.to_string()),
         _ => Err(format!(
-            "BAD_ARGS: no tool named {name:?}. Use pane_list, pane_read, pane_spawn, pane_send or pane_report."
+            "BAD_ARGS: no tool named {name:?}. Use pane_list, pane_read, pane_spawn, pane_send, pane_report or \
+             pane_claim."
         )),
     }
 }
@@ -272,13 +299,19 @@ mod tests {
                 "pane_read",
                 "pane_spawn",
                 "pane_send",
-                "pane_report"
+                "pane_report",
+                "pane_claim"
             ]
         );
         for t in &tools[..2] {
             assert_eq!(t.annotations.as_ref().unwrap().read_only_hint, Some(true));
         }
-        for t in &tools[2..] {
+        let claim = tools[5].annotations.as_ref().unwrap();
+        assert_eq!(
+            (claim.read_only_hint, claim.idempotent_hint),
+            (Some(false), Some(true))
+        );
+        for t in &tools[2..5] {
             let a = t.annotations.as_ref().unwrap();
             assert_eq!(
                 (
@@ -432,6 +465,57 @@ mod tests {
             "{err}"
         );
         assert!(call_json(&e, "p2", "pane_read", json!({"pane": "p1"})).is_ok());
+    }
+
+    #[test]
+    fn pane_claim_paths_overlap_and_pane_list() {
+        let (e, _) = engine();
+        // Panes of `engine()` sit in "/": claim paths that do not exist yet, so nothing on disk matters.
+        let claim = |caller: &str, paths: Value| {
+            call_json(&e, caller, "pane_claim", json!({"paths": paths}))
+        };
+        let mine = claim(
+            "p2",
+            json!(["agentdeck-claim-x/src", "agentdeck-claim-x/a.rs"]),
+        )
+        .unwrap();
+        assert_eq!(
+            mine["claims"],
+            json!(["/agentdeck-claim-x/src", "/agentdeck-claim-x/a.rs"])
+        );
+        let err = claim("p3", json!(["agentdeck-claim-x/src/lib.rs"])).unwrap_err();
+        assert!(
+            err.starts_with("CLAIMED: /agentdeck-claim-x/src/lib.rs overlaps /agentdeck-claim-x/src, claimed by p2."),
+            "{err}"
+        );
+        // Another workspace may claim the same path.
+        assert!(claim("p5", json!(["agentdeck-claim-x/src"])).is_ok());
+        assert_eq!(code(claim("p3", json!(["/etc"]))), "PATH_OUTSIDE");
+        assert_eq!(code(claim("p3", json!(["../etc"]))), "PATH_OUTSIDE");
+        let eleven: Vec<String> = (0..11).map(|i| format!("f{i}")).collect();
+        assert_eq!(code(claim("p3", json!(eleven))), "BAD_ARGS");
+        assert_eq!(
+            code(call_json(&e, "p3", "pane_claim", json!({}))),
+            "BAD_ARGS"
+        );
+        assert_eq!(
+            code(call_json(
+                &e,
+                "p3",
+                "pane_claim",
+                json!({"paths": [], "pane": "p2"})
+            )),
+            "BAD_ARGS"
+        );
+        let l = call_json(&e, "p1", "pane_list", json!({})).unwrap();
+        assert_eq!(
+            l["panes"][1]["claims"],
+            json!(["/agentdeck-claim-x/src", "/agentdeck-claim-x/a.rs"])
+        );
+        assert_eq!(l["panes"][0]["claims"], json!([]));
+        // Released: p3 may now take it.
+        assert_eq!(claim("p2", json!([])).unwrap()["claims"], json!([]));
+        assert!(claim("p3", json!(["agentdeck-claim-x/src/lib.rs"])).is_ok());
     }
 
     #[test]

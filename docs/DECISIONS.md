@@ -471,3 +471,29 @@ halaman merek OpenAI menjawab 403 (hanya terbaca lewat cuplikan pencarian, belum
 - Uji di aplikasi setelah perbaikan: p1 diberi kata kode, ⌘Q → `layout.json` menyimpan sesi p1; buka lagi, Jalankan
   p1 → proses berjalan dengan `--resume`, riwayat lama tampil, Claude menjawab kata kodenya. Tombol pane pulihan belum
   memberi tahu bahwa percakapan dilanjutkan.
+
+## D-033 — Pengaman kuota `pane_spawn` dan klaim berkas `pane_claim` (2026-10-23)
+- Ide dari riset MXterm Pro (RESEARCH §2), konsep saja; tidak ada teks atau kode yang disalin.
+- **Pengaman kuota.** `pane_spawn` ditolak dengan `QUOTA_LOW` bila kuota 5 jam Claude pemanggil (`usage::read`,
+  D-029) ≥ ambang. Bawaan 85% (seperti MXterm), rentang aman 50–100%. Diperiksa setelah sakelar, nesting, dan batas,
+  sebelum katalog dan kartu; hanya pada pemeriksaan pertama, agar penolakan tidak pernah memegang slot rate/anak.
+  Pane tanpa bacaan (Codex, atau Claude sebelum giliran pertama) tidak ditolak. Penolakan diaudit (`spawn_refused`)
+  dan dikirim ke UI sebagai `Notice::Refused { code: "QUOTA_LOW", limit: ambang }`.
+- Berlaku apa pun agen anaknya, sesuai permintaan: pemanggil tetap memakai kuotanya untuk mengoordinasi anak. Bila
+  nanti spawn Codex dari Claude yang hampir habis ingin diizinkan, cukup ubah `Spawner::policy`.
+- Ambang disimpan di `Limits` (`quota_guard`, `set_quota_guard`), bukan sebagai varian `Limit`: `settings.rs`
+  mencocokkan semua varian `Limit` dan sedang diubah sesi lain. Akibatnya ambang belum bisa diatur dari Settings dan
+  UI belum punya toast untuk `QUOTA_LOW` (`refusedText` mengembalikan `null`, agen tetap membaca galatnya).
+- **Klaim berkas.** Tool baru `pane_claim {paths}` dipilih daripada argumen `files` di `pane_report`: laporan dikirim
+  sekali di akhir, klaim dibutuhkan di awal kerja. Bentuknya sekecil mungkin: satu argumen, panggilan mengganti klaim
+  sebelumnya, `[]` melepas. Tanpa argumen perintah, flag, env, atau pane lain (AGENTS.md aturan 4).
+- Path relatif terhadap `cwd` pane, ≤ 10, tetap di dalam `cwd` setelah symlink diurai (`PATH_OUTSIDE` bila tidak).
+  Disimpan absolut supaya pane dengan `cwd` berbeda (anak di subfolder) bisa dibandingkan; anak `worktree: true`
+  otomatis tidak bertabrakan dengan pohon induk. Tumpang tindih per komponen dengan klaim pane hidup lain di
+  workspace yang sama → `CLAIMED` yang menyebut pane pemiliknya; klaim pemanggil tidak berubah.
+- Dilepas saat proses keluar (`PaneEvent::Exited`) dan saat pane ditutup; `pane_list` menampilkan `claims` tiap pane.
+- Hanya penanda kerja sama: agentdeck tidak bisa dan tidak mencoba memblokir penulisan berkas. Peer di workspace yang
+  sama melihat klaim lewat `pane_list` meski tidak boleh saling kirim.
+- Uji: unit (`policy` ambang dan rentang, `spawn` QUOTA_LOW sebelum kartu tanpa memakai slot, `mcp::claim` path
+  keluar `cwd`/symlink/bentuk, `panes` tumpang tindih dan pelepasan, `mcp::tools` alur tool), integrasi HTTP
+  (`tests/mcp_server.rs`: `CLAIMED` menyebut pemilik, `pane_list` memuat klaim). Belum diuji dengan agen asli.

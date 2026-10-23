@@ -46,7 +46,7 @@ Agen adalah proses CLI biasa di PTY. Agen berbicara ke agentdeck lewat MCP; agen
 | `launch.rs` | Menyusun argv dan env per agen, termasuk injeksi MCP (§4). |
 | `mcp/` | Server MCP `rmcp` (fitur `transport-streamable-http-server`) dipasang di `axum` pada `/mcp`; middleware token, `Origin` apa pun → 403, `Host` asing → 403; melayani protokol `2026-07-28` (tanpa sesi, Claude) dan `2025-06-18` (dengan `Mcp-Session-Id`, Codex) (D-017); implementasi tool. |
 | `delivery.rs` | Antrean pesan per pane tujuan, syarat siap, penulisan tempelan, pengaman putaran (§5). |
-| `policy.rs` | Relasi pane (induk, anak, peer), batas spawn, rate limit, aturan baca/kirim. |
+| `policy.rs` | Relasi pane (induk, anak, peer), batas spawn, rate limit, pengaman kuota, aturan baca/kirim. |
 | `approvals.rs` | Mengirim kartu persetujuan ke UI dan menunggu jawaban dengan batas waktu. |
 | `store.rs` | Settings, log pesan, dan log audit di `~/Library/Application Support/<bundle-id>/`. |
 
@@ -64,7 +64,8 @@ throughput", channel "designed to be fast and deliver ordered data"). Input, res
 
 ## 3. Siklus hidup pane
 
-1. **Buat.** UI atau `pane_spawn` meminta pane baru. `policy` memeriksa batas. `launch` menyusun argv/env.
+1. **Buat.** UI atau `pane_spawn` meminta pane baru. `policy` memeriksa batas dan, untuk `pane_spawn`, kuota 5 jam
+   Claude pemanggil (D-033). `launch` menyusun argv/env.
 2. **Jalankan.** `portable-pty` membuka PTY seukuran pane dan menjalankan program **langsung dengan argv, tanpa shell**,
    sehingga teks tugas dari agen tidak pernah diurai shell (D-009). `PATH` diambil sekali saat aplikasi mulai dari
    `$SHELL -l -i -c` yang mencetak `PATH` di antara dua penanda (agar keluaran `.zshrc` tidak ikut terbaca); `-i` perlu
@@ -80,7 +81,8 @@ throughput", channel "designed to be fast and deliver ordered data"). Input, res
    putaran event loop lewat microtask (bukan `setTimeout`, yang ditahan WebKit saat jendela tersembunyi). Total
    kumulatif membuat ack yang hilang tertutup oleh ack berikutnya. Perintah `pane_write`/`pane_ack` `async` agar
    tidak berjalan di main thread. Tanpa ini xterm.js membuang data ("write data discarded").
-4. **Selesai.** Saat proses keluar: status `exited`, token pane dicabut, pesan yang tertahan ditandai `dropped`, UI
+4. **Selesai.** Saat proses keluar: status `exited`, token pane dicabut, klaim berkasnya dilepas (§5.6), pesan yang
+   tertahan ditandai `dropped`, UI
    menawarkan "Jalankan ulang" atau "Buka shell di sini".
 5. **Tutup.** Hanya orang. `SIGTERM` ke grup proses, `SIGKILL` setelah 3 detik. Saat aplikasi keluar, semua pane
    diperlakukan sama. Bila aplikasi crash, master PTY tertutup dan kernel mengirim `SIGHUP` ke sesi.
@@ -222,6 +224,16 @@ ESC[200~[agentdeck] message from p2 (codex, "review: auth"). Reply with pane_sen
 - Saat mencapai batas (bawaan 12), semua antrean di workspace dijeda dan kartu "Lanjutkan / Hentikan" muncul.
   "Hentikan" membuang antrean (`dropped`).
 - `pane_send` tetap mengembalikan `state:"paused"` agar agen tahu pesannya tertahan.
+
+### 5.6 Klaim berkas (D-033)
+- `pane_claim` menyimpan ≤ 10 path absolut per pane di registri (`panes.rs`). Path diberikan relatif terhadap `cwd`
+  pane; `mcp/claim.rs` menolak path absolut, `..`, dan symlink yang keluar dari `cwd` (leluhur terdalam yang ada
+  di-`canonicalize`, sisanya ditempel apa adanya; symlink gantung ditolak).
+- Tumpang tindih = path sama atau satu di dalam yang lain, per komponen. Dicek terhadap klaim pane hidup lain di
+  workspace yang sama, di bawah kunci registri yang sama dengan penyimpanannya, jadi dua klaim tidak berpacu.
+- Dilepas saat proses keluar dan saat pane ditutup. `pane_list` menampilkan klaim tiap pane.
+- Hanya penanda kerja sama: agentdeck tidak mencegah agen menulis berkas yang diklaim pane lain. Anak dengan
+  `worktree: true` punya path absolut lain, jadi klaimnya tidak pernah bertabrakan dengan pane di pohon induk.
 
 ## 6. Deteksi status
 

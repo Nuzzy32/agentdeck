@@ -309,7 +309,8 @@ async fn tools_listed_and_errors_are_tool_results() {
             "pane_read",
             "pane_spawn",
             "pane_send",
-            "pane_report"
+            "pane_report",
+            "pane_claim"
         ],
         "{msg}"
     );
@@ -331,4 +332,31 @@ async fn tools_listed_and_errors_are_tool_results() {
         assert!(text.starts_with(code), "{text}");
         assert!(!text.contains(&f.p1), "no token in errors");
     }
+
+    // D-033: p1 claims a folder; p2's claim inside it is refused naming p1, and pane_list shows p1's claim.
+    let call = |token: &str, name: &'static str, args: Value| {
+        let body = json!({"jsonrpc": "2.0", "id": 3, "method": "tools/call",
+            "params": {"name": name, "arguments": args, "_meta": meta}});
+        let [v, m] = h("tools/call");
+        let req = post(&f.url, Some(token), &[v, m, ("Mcp-Name", name)], &body);
+        async move { rpc(req.send().await.unwrap()).await }
+    };
+    let ok = call(&f.p1, "pane_claim", json!({"paths": ["agentdeck-it/src"]})).await;
+    assert_eq!(ok["result"]["isError"], false, "{ok}");
+    let refused = call(
+        &f.p2,
+        "pane_claim",
+        json!({"paths": ["agentdeck-it/src/a.rs"]}),
+    )
+    .await;
+    assert_eq!(refused["result"]["isError"], true, "{refused}");
+    let text = refused["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(
+        text.starts_with("CLAIMED: ") && text.contains("claimed by p1"),
+        "{text}"
+    );
+    let list = call(&f.p2, "pane_list", json!({})).await;
+    let list: Value =
+        serde_json::from_str(list["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(list["panes"][0]["claims"], json!(["/agentdeck-it/src"]));
 }
