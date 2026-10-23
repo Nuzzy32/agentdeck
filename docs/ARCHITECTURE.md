@@ -70,7 +70,9 @@ throughput", channel "designed to be fast and deliver ordered data"). Input, res
    sehingga teks tugas dari agen tidak pernah diurai shell (D-009). `PATH` diambil sekali saat aplikasi mulai dari
    `$SHELL -l -i -c` yang mencetak `PATH` di antara dua penanda (agar keluaran `.zshrc` tidak ikut terbaca); `-i` perlu
    karena zsh non-interaktif tidak membaca `~/.zshrc`, tempat nvm/volta biasa menambah `PATH`. Pane shell menjalankan
-   `$SHELL -l`.
+   `$SHELL -l`. Untuk zsh, `ZDOTDIR` menunjuk ke `.zshenv` integrasi (`src-tauri/shell/zsh/.zshenv`, ditulis ke
+   `$TMPDIR/agentdeck-zsh-<uid>/`) yang menghapus `ZDOTDIR`, membaca dotfile pengguna seperti biasa, lalu memasang hook
+   OSC 133; `TerminalPane` memberi penanda exit di gutter dan ⌘↑/⌘↓ loncat antarperintah (D-031).
 3. **Alirkan.** Thread baca meneruskan setiap potongan output ke: `Screen` (vt100), pemindai OSC (`status`), dan
    `Channel` ke WebView. Bila WebView belum terpasang untuk pane itu, core sendiri yang mengonfirmasi byte yang masuk
    ke buffer putar ulang (1 MB terakhir, yang tertua dibuang), sehingga agen tidak pernah tertahan karena pane tidak
