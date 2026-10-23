@@ -24,7 +24,6 @@ tinjau T2.6; Phase 5 (nama + bundle id final, signing + notarisasi, updater, iko
 - Saat aplikasi crash: proses yang mengabaikan SIGHUP atau membuat sesi sendiri (Bash tool Claude) bisa tertinggal;
   pid yang dipakai ulang selama masa tenggang 3 s bisa ikut di-SIGKILL (`ponytail:` di `pty.rs`).
 - Worktree anak yang masih terbuka saat aplikasi keluar tidak dibersihkan (kecuali anaknya dipulihkan T4.3 lalu ditutup).
-- `pane_read` mengembalikan saran samar Claude ("Try …") seperti teks biasa.
 - Claude di subfolder repo yang `CLAUDE.md`-nya mengimpor berkas di luar folder menampilkan dialog "Allow external
   CLAUDE.md file imports?" dan diam sampai dijawab.
 - Jendela tersembunyi: WebKit menahan render; banjir output berwarna melambat (agen tidak tertahan).
