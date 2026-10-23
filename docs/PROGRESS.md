@@ -30,7 +30,7 @@ tinjau T2.6; Phase 5 (nama + bundle id final, signing + notarisasi, updater, iko
 - Jendela tersembunyi: WebKit menahan render; banjir output berwarna melambat (agen tidak tertahan).
 - Log Codex: thread judul mencatat `invalid transport in mcp_servers.agentdeck` (tidak memengaruhi sesi).
 
-**Keputusan tertunda pemilik:** D-019 (teruskan kunci API lewat daftar izin?), nama final + bundle id, distribusi
+**Keputusan tertunda pemilik:** D-026 (rilis publik ditunda sampai Anthropic menjawab soal Commercial Terms? catatan tidak berafiliasi di README?), D-019 (teruskan kunci API lewat daftar izin?), nama final + bundle id, distribusi
 pribadi atau publik.
 
 **Catatan lingkungan pemilik:**

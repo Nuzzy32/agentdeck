@@ -379,3 +379,25 @@ ditutup/keluar → `denied`.
   split, dan fokus pulih, kedua pane "belum dijalankan"; Jalankan menghidupkan shell di foldernya; pane baru dapat p3;
   menutup pane pulihan yang belum dijalankan memperbarui berkas. Dengan Claude Code 2.1.309: anak `pane_spawn` dengan
   worktree pulih sebagai "anak p1" dan "belum dijalankan"; menutupnya menghapus worktree `agent/p2` yang bersih.
+
+## D-026 — T5.4: ketentuan provider diperiksa ulang (2026-10-23, menunggu keputusan pemilik)
+Dibaca 2026-10-23: code.claude.com/docs/en/legal-and-compliance, anthropic.com/legal/consumer-terms, artikel bantuan
+Claude tentang login dan Agent SDK, learn.chatgpt.com/docs/auth, repo `openai/codex` (Apache-2.0). Terms of Use dan
+halaman merek OpenAI menjawab 403 (hanya terbaca lewat cuplikan pencarian, belum terverifikasi).
+- **Pemakaian pribadi: boleh.** Binary tidak dimodifikasi, login milik pengguna, kredensial tidak disentuh (D-006
+  tetap berlaku).
+- **Baru sejak D-006 (Anthropic):** menjalankan Claude Code "in your products or services" (contohnya sandbox ter-host
+  atau infrastruktur agen) memerlukan Commercial Terms. Belum jelas apakah aplikasi lokal yang meluncurkan CLI milik
+  pengguna termasuk. Batas Pro/Max disebut untuk pemakaian biasa dan perorangan, dan Consumer Terms melarang akses
+  otomatis lewat bot atau skrip kecuali dengan kunci API, jadi orkestrasi agen-ke-agen di langganan adalah area abu-abu.
+  Anthropic sudah menindak harness pihak ketiga (yang memakai OAuth langsung, tidak seperti agentdeck).
+- **Merek:** nama dan logo Claude/Claude Code/Anthropic tidak boleh dipakai di nama atau logo produk; teks biasa
+  "menjalankan Claude Code" boleh. Cuplikan pedoman merek OpenAI melarang nama model dan merek GPT di nama aplikasi.
+- **OpenAI:** tidak ditemukan larangan eksplisit untuk pembungkus lokal CLI yang tidak dimodifikasi; Terms of Use
+  (cuplikan) melarang mengekstrak output "automatically or programmatically". `pane_read` bisa ditafsirkan begitu,
+  jadi status ini belum jelas.
+- **Usulan (belum diputuskan):** rilis publik ditunda sampai Anthropic menjawab soal Commercial Terms. Nama tetap tanpa
+  Claude/Codex/GPT/ChatGPT. README dan layar pertama menyebut bahwa agentdeck tidak berafiliasi dengan Anthropic atau
+  OpenAI, bahwa pengguna memasang dan login sendiri, dan bahwa pemakaian paralel menghabiskan kuota paket pengguna.
+  Tidak membundel binary agen, tidak ada mode ter-host, tidak ada jalan tanpa orang (pengaman putaran dan kartu
+  persetujuan tetap). Terms of Use OpenAI dibuka manual di browser sebelum rilis.
