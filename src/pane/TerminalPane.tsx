@@ -1,10 +1,12 @@
-import { useContext, useEffect, useRef } from "react";
+import { useContext, useEffect, useRef, useState } from "react";
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { FitAddon } from "@xterm/addon-fit";
+import { SearchAddon } from "@xterm/addon-search";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import { TerminalContext, xtermTheme } from "../settings/settings";
+import { FindBar } from "./FindBar";
 import { activity, cumulativeAcker, inputClock, serial, writeQueue } from "./io";
 
 /** A CSS variable as resolved on `el`, where the pane's `data-term-theme` applies. */
@@ -38,18 +40,22 @@ export function TerminalPane({
   id,
   focused,
   fontSize,
+  findReq = 0,
   onActivity,
 }: {
   id: number;
   focused: boolean;
   fontSize: number;
+  /** ⌘F: a new value opens the find bar (or focuses it again). */
+  findReq?: number;
   /** Output heuristic for the status dot: busy on output, quiet after a second without (ARCHITECTURE §6). */
   onActivity: (busy: boolean) => void;
 }) {
   const host = useRef<HTMLDivElement>(null);
   const activityCb = useRef(onActivity);
   activityCb.current = onActivity;
-  const term = useRef<{ t: Terminal; fit: FitAddon } | null>(null);
+  const term = useRef<{ t: Terminal; fit: FitAddon; search: SearchAddon } | null>(null);
+  const [finding, setFinding] = useState(false);
   // Font, scrollback, theme (TERM-07). Read once at creation; later changes go through the effects below without
   // recreating the terminal.
   const cfg = useContext(TerminalContext);
@@ -66,9 +72,13 @@ export function TerminalPane({
       theme: xtermTheme(reader(el)),
       scrollback: c.scrollback,
       screenReaderMode: c.screen_reader,
+      // The search addon's match decorations (⌘F) are still a proposed xterm.js API.
+      allowProposedApi: true,
     });
     const fit = new FitAddon();
     t.loadAddon(fit);
+    const search = new SearchAddon();
+    t.loadAddon(search);
     t.open(el);
     try {
       const gl = new WebglAddon();
@@ -78,7 +88,7 @@ export function TerminalPane({
     } catch {
       // No WebGL2: the DOM renderer stays.
     }
-    term.current = { t, fit };
+    term.current = { t, fit, search };
     let live = true;
 
     const ack = cumulativeAcker((total) => {
@@ -131,6 +141,31 @@ export function TerminalPane({
   }, [focused]);
 
   useEffect(() => {
+    if (findReq > 0) setFinding(true);
+  }, [findReq]);
+
+  const closeFind = () => {
+    term.current?.search.clearDecorations();
+    setFinding(false);
+    term.current?.t.focus();
+  };
+
+  // Decorations need #rrggbb, which the tokens are: other matches outlined in the accent, the active one in amber.
+  const findOptions = () => {
+    const token = reader(host.current ?? undefined);
+    const accent = token("--term-accent");
+    const active = token("--warn");
+    return {
+      decorations: {
+        matchBorder: accent,
+        matchOverviewRuler: accent,
+        activeMatchBorder: active,
+        activeMatchColorOverviewRuler: active,
+      },
+    };
+  };
+
+  useEffect(() => {
     const cur = term.current;
     if (!cur || cur.t.options.fontSize === fontSize) return;
     cur.t.options.fontSize = fontSize;
@@ -156,7 +191,13 @@ export function TerminalPane({
     if (cur && host.current) cur.t.options.theme = xtermTheme(reader(host.current));
   }, [cfg.theme]);
 
+  const search = term.current?.search;
   return (
-    <div ref={host} className="pane-term" data-term-theme={cfg.theme === "system" ? undefined : cfg.theme} />
+    <>
+      <div ref={host} className="pane-term" data-term-theme={cfg.theme === "system" ? undefined : cfg.theme} />
+      {finding && search ? (
+        <FindBar search={search} options={findOptions} focusReq={findReq} onClose={closeFind} />
+      ) : null}
+    </>
   );
 }

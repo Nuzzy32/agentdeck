@@ -406,3 +406,15 @@ halaman merek OpenAI menjawab 403 (hanya terbaca lewat cuplikan pencarian, belum
   `pnpm tauri build`, pembaruan lewat `git pull` + build ulang); bundle id `local.agentdeck.desktop` tetap, sehingga
   `settings.json`, `layout.json`, dan log yang sudah ada tetap terpakai. Ikon sendiri tanpa logo atau warna khas
   provider. T5.2 (notarisasi) dan T5.3 (updater + halaman rilis) dibuka lagi bila rilis publik diputuskan.
+
+## D-027 — TERM-03: cari teks di pane (2026-10-23)
+- Celah P0 yang terlewat sejak T1.4: `⌘F` tercantum di UI-UX §7 tetapi tidak pernah dibuat. Ditemukan saat audit PRD.
+- `@xterm/addon-search` 0.16.0 (addon resmi xterm.js, pasangan xterm 6.0; tanpa dependency lain). Sorotan semua hasil
+  dan penghitung `N/M` memakai dekorasi addon, yang di xterm 6 masih *proposed API*, sehingga Terminal dibuat dengan
+  `allowProposedApi: true`. Opsi ini hanya membuka API xterm untuk kode kita sendiri; tidak ada dampak keamanan.
+- Kotak cari di pojok kanan atas pane, di luar elemen host terminal, supaya ketikan di sana tidak dihitung sebagai
+  orang mengetik oleh antrean pesan (§5.2). Enter/⇧Enter berikutnya/sebelumnya, Esc menutup dan menghapus sorotan.
+  Warna dari token (`--term-accent` untuk hasil, `--warn` untuk hasil aktif). Pane tanpa terminal (dipulihkan, gagal)
+  tidak membuka kotak cari.
+- Uji di aplikasi (`pnpm tauri dev`, pane shell): `hello` → 4 hasil bergaris, "1/4"; Enter → "2/4"; Esc menutup dan
+  fokus kembali ke terminal.

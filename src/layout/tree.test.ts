@@ -149,6 +149,7 @@ describe("shortcut", () => {
       [key("Enter", "Enter", { shift: true }), { type: "zoom" }],
       [key("b", "KeyB"), { type: "sidebar" }],
       [key("j", "KeyJ"), { type: "jump" }],
+      [key("f", "KeyF"), { type: "find" }],
       [key("M", "KeyM", { shift: true }), { type: "messages" }],
       [key("=", "Equal"), { type: "font", delta: 1 }],
       [key("+", "Equal", { shift: true }), { type: "font", delta: 1 }],

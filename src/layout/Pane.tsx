@@ -63,6 +63,7 @@ export function PaneView({
   focused,
   zoomed,
   fontSize,
+  findReq = 0,
   actions,
   cards,
 }: {
@@ -70,6 +71,8 @@ export function PaneView({
   focused: boolean;
   zoomed: boolean;
   fontSize: number;
+  /** ⌘F requests for this pane; each new value opens or refocuses its find bar. */
+  findReq?: number;
   actions: PaneActions;
   /** Spawn approval cards this pane asked for (UI-UX §4.2), shown over the top of its terminal. */
   cards?: ReactNode;
@@ -131,7 +134,13 @@ export function PaneView({
           </button>
         </div>
       ) : pane.ptyId !== null ? (
-        <TerminalPane id={pane.ptyId} focused={focused} fontSize={fontSize} onActivity={actions.onActivity} />
+        <TerminalPane
+          id={pane.ptyId}
+          focused={focused}
+          fontSize={fontSize}
+          findReq={findReq}
+          onActivity={actions.onActivity}
+        />
       ) : (
         <div className="pane-body" />
       )}

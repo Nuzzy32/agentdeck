@@ -1,5 +1,5 @@
 // Keyboard shortcuts, UI-UX §7. Every one uses ⌘, so Ctrl/⌥ stay with the program in the terminal; ⌘C/⌘V are not
-// mapped and keep copy/paste. ⌘J reaches the loop guard ribbon (cards join in T3.1); ⌘F is not mapped yet.
+// mapped and keep copy/paste. ⌘J reaches the loop guard ribbon and cards; ⌘F opens the focused pane's find bar.
 import type { Side } from "./tree";
 
 export type Action =
@@ -14,6 +14,7 @@ export type Action =
   | { type: "messages" }
   | { type: "jump" }
   | { type: "font"; delta: 1 | -1 | 0 }
+  | { type: "find" }
   | { type: "settings" };
 
 export type KeyInput = Pick<KeyboardEvent, "key" | "code" | "metaKey" | "shiftKey" | "altKey" | "ctrlKey">;
@@ -43,6 +44,7 @@ export function shortcut(e: KeyInput): Action | null {
   if (key === "w") return { type: "close" };
   if (key === "b") return { type: "sidebar" };
   if (key === "j") return { type: "jump" };
+  if (key === "f") return { type: "find" };
   if (e.code === "Equal") return { type: "font", delta: 1 };
   if (e.code === "Minus") return { type: "font", delta: -1 };
   if (e.code === "Digit0") return { type: "font", delta: 0 };

@@ -816,3 +816,40 @@ textarea.input {
     transform: translateY(4px);
   }
 }
+
+/* Find in pane (TERM-03): over the top right of the terminal, below the header, under the approval cards. */
+.find-bar {
+  position: absolute;
+  top: 32px;
+  right: 12px;
+  z-index: 15;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--raised);
+  box-shadow: 0 4px 16px color-mix(in srgb, var(--bg) 60%, transparent);
+}
+.find-input {
+  width: 180px;
+  height: 24px;
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--fg);
+  font: var(--text-ui) / var(--leading-ui) var(--font-ui);
+}
+.find-input:focus {
+  outline: 1px solid var(--accent);
+  border-color: var(--accent);
+}
+.find-count {
+  min-width: 56px;
+  padding: 0 4px;
+  color: var(--muted);
+  font-size: var(--text-label);
+  text-align: center;
+}

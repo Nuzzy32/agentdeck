@@ -117,6 +117,8 @@ function App() {
   const [messages, setMessages] = useState<PanelOverride>(null);
   const [agents, setAgents] = useState<AgentInfo[] | null>(null);
   const [launcher, setLauncher] = useState<LauncherTarget | null>(null);
+  // ⌘F (TERM-03): `n` grows on every press, so the pane opens or refocuses its find bar.
+  const [find, setFind] = useState<{ pane: string; n: number } | null>(null);
   // Open Settings section, or null.
   const [settingsAt, setSettingsAt] = useState<Section | null>(null);
   // The launcher preselects what was launched last.
@@ -583,6 +585,12 @@ function App() {
           const next = nextFontSize(fontSize, action.delta);
           return next === fontSize ? undefined : updateSettings({ terminal: { font_size: next } });
         }
+        case "find": {
+          // Only a pane with a terminal; a restored or failed pane has nothing to search.
+          const id = active?.focused;
+          if (id && panes[id]?.ptyId != null) setFind((f) => ({ pane: id, n: (f?.n ?? 0) + 1 }));
+          return;
+        }
         case "settings":
           return setSettingsAt("agents");
       }
@@ -644,6 +652,7 @@ function App() {
                         focused={id === active.focused}
                         zoomed={id === active.zoomed}
                         fontSize={fontSize}
+                        findReq={find?.pane === id ? find.n : 0}
                         actions={{
                           onFocus: () => focusPane(id),
                           onSplit: (dir) => splitPane(dir, id),
