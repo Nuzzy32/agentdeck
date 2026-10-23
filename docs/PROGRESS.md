@@ -11,8 +11,8 @@ Terakhir diperbarui: 2026-10-23. Phase 0–3 selesai (MVP); sisa Phase 4 dan uji
 - Codex sebagai peninjau di alur B, `tool_timeout_sec=330` di Codex (kartu dijawab > 60 s), dan Codex sebagai pemanggil
   `pane_spawn`: server OpenAI terus "Selected model is at capacity" (juga `-m gpt-5.6-luna`).
 - Permintaan kerja dari Codex ke Claude (yang terbukti baru Claude → Codex dikerjakan).
-- Alur D: pita pengaman putaran di 12 pesan, Lanjutkan/Hentikan, dengan agen asli.
-- `pane_read` dipanggil agen asli; pesan menunggu saat kotak input berisi ketikan orang (baru di fake-agent).
+- Pesan menunggu saat kotak input berisi ketikan orang (baru di fake-agent).
+- Codex masih "Selected model is at capacity" saat dicek 2026-10-23 sore.
 - Notifikasi macOS kartu persetujuan (perlu dilihat dan diklik pemilik).
 - 6 pane agen aktif di MacBook Air M1 8 GB tanpa UI tersendat.
 
@@ -29,6 +29,12 @@ tinjau T2.6; Phase 5 (nama + bundle id final, signing + notarisasi, updater, iko
   CLAUDE.md file imports?" dan diam sampai dijawab.
 - Jendela tersembunyi: WebKit menahan render; banjir output berwarna melambat (agen tidak tertahan).
 - Log Codex: thread judul mencatat `invalid transport in mcp_servers.agentdeck` (tidak memengaruhi sesi).
+
+**Terbukti 2026-10-23 (Claude Code 2.1.309, dua pane Claude, batas putaran sementara 4):** alur D — setelah 4 pesan
+pita "Agen sudah saling mengirim 4 pesan tanpa masukanmu" muncul, status bar `4/4` amber, chip "1 pesan" di tujuan;
+Lanjutkan mengirim pesan tertahan dan penghitung mulai lagi; Hentikan dan buang antrean menghapus pita dan chip, log
+`dropped` "stopped by the person at the loop guard", audit `loop_paused`. `pane_read` dipanggil Claude asli dan
+membaca layar pane lain dengan benar.
 
 **Keputusan tertunda pemilik:** D-026 (rilis publik ditunda sampai Anthropic menjawab soal Commercial Terms? catatan tidak berafiliasi di README?), D-019 (teruskan kunci API lewat daftar izin?), nama final + bundle id, distribusi
 pribadi atau publik.
