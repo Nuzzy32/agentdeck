@@ -42,6 +42,8 @@ import { canSplit, type Dir, leaves, neighbor, type Rect, rects, remove, setRati
 import { Launcher, SHELL } from "./launcher/Launcher";
 import { serial } from "./pane/io";
 import { measureCell } from "./pane/TerminalPane";
+import { Palette } from "./prompts/Palette";
+import { pasteInto, type Preset, presetTree } from "./prompts/prompts";
 import { type Section, SettingsModal } from "./settings/SettingsModal";
 import { TerminalContext, useSettings } from "./settings/settings";
 import { type KeptWorktree, keptText, placeChild, refusedText, spawnClient } from "./spawn/spawned";
@@ -124,6 +126,8 @@ function App() {
   const [find, setFind] = useState<{ pane: string; n: number } | null>(null);
   // Open Settings section, or null.
   const [settingsAt, setSettingsAt] = useState<Section | null>(null);
+  // Prompt palette (⌘P, D-032).
+  const [palette, setPalette] = useState(false);
   // The launcher preselects what was launched last.
   const [choice, setChoice] = useState(SHELL);
   const [recents, setRecents] = useState(loadRecents);
@@ -377,6 +381,39 @@ function App() {
 
   const agentName = (id: string | null) => (id ? (agents?.find((a) => a.id === id)?.name ?? id) : "Shell");
 
+  /** A pane not started yet, for `startPty`. */
+  const newPane = (agentId: string | null, cwd: string, task: string): Pane => ({
+    id: "",
+    agentId,
+    agent: agentName(agentId),
+    title: paneTitle(agentId ? task : "", cwd),
+    folder: tilde(cwd),
+    cwd,
+    status: "unknown",
+    official: false,
+    startedAt: 0,
+    pending: 0,
+    ptyId: null,
+    spawn: 0,
+  });
+
+  const rememberFolder = (cwd: string) => {
+    const next = pushRecent(recents, cwd);
+    setRecents(next);
+    saveRecents(next);
+  };
+
+  /** Shows workspace `wsId` (from `workspace_create`), named after its folder. */
+  const addWorkspace = (wsId: number, cwd: string, tree: Workspace["tree"], focused: string) => {
+    setWorkspaces((list) => {
+      const base = basename(cwd);
+      let name = base;
+      for (let k = 2; list.some((ws) => ws.name === name); k++) name = `${base} ${k}`;
+      return [...list, { id: wsId, name, folder: cwd, tree, focused, zoomed: null }];
+    });
+    setActiveId(wsId);
+  };
+
   /** Launcher submit: opens the pane, then places it. On error nothing is placed and the launcher shows why. */
   const launch = async (pick: string, cwd: string, task: string): Promise<LaunchError | null> => {
     const target = launcher;
@@ -390,39 +427,14 @@ function App() {
       } catch (e) {
         return toLaunchError(e);
       }
-      const res = await startPty(
-        {
-          id: "",
-          agentId,
-          agent: agentName(agentId),
-          title: paneTitle(agentId ? task : "", cwd),
-          folder: tilde(cwd),
-          cwd,
-          status: "unknown",
-          official: false,
-          startedAt: 0,
-          pending: 0,
-          ptyId: null,
-          spawn: 0,
-        },
-        task,
-        ws,
-        false,
-      );
+      const res = await startPty(newPane(agentId, cwd, task), task, ws, false);
       if ("error" in res) {
         if (target.kind === "workspace") invoke("workspace_close", { id: ws }).catch(() => undefined);
         return res.error;
       }
       const { id } = res;
       if (target.kind === "workspace") {
-        const wsId = ws;
-        setWorkspaces((list) => {
-          const base = basename(cwd);
-          let name = base;
-          for (let k = 2; list.some((ws) => ws.name === name); k++) name = `${base} ${k}`;
-          return [...list, { id: wsId, name, folder: cwd, tree: { pane: id }, focused: id, zoomed: null }];
-        });
-        setActiveId(wsId);
+        addWorkspace(ws, cwd, { pane: id }, id);
       } else {
         updateWs(target.ws, (w) =>
           leaves(w.tree).includes(target.target)
@@ -430,15 +442,55 @@ function App() {
             : w,
         );
       }
-      const next = pushRecent(recents, cwd);
-      setRecents(next);
-      saveRecents(next);
+      rememberFolder(cwd);
       setChoice(pick);
       setLauncher(null);
       return null;
     } finally {
       creating.current = false;
     }
+  };
+
+  /**
+   * Session preset (D-032): a new workspace with the preset's agents through the same `pane_create` as the launcher,
+   * so they get the catalogue's arguments and nothing else. All or nothing: if one fails, the started ones close.
+   */
+  const openPreset = async (preset: Preset, cwd: string): Promise<LaunchError | null> => {
+    if (creating.current) return null;
+    creating.current = true;
+    try {
+      let ws: number;
+      try {
+        ws = await invoke<number>("workspace_create");
+      } catch (e) {
+        return toLaunchError(e);
+      }
+      const started: string[] = [];
+      for (const agentId of preset.agents) {
+        const res = await startPty(newPane(agentId, cwd, ""), "", ws, false);
+        if ("error" in res) {
+          setPanes((all) => Object.fromEntries(Object.entries(all).filter(([id]) => !started.includes(id))));
+          for (const id of started) invoke("pane_close", { pane: id }).catch(() => undefined);
+          invoke("workspace_close", { id: ws }).catch(() => undefined);
+          return res.error;
+        }
+        started.push(res.id);
+      }
+      addWorkspace(ws, cwd, presetTree(started, preset.dir), started[0] ?? "");
+      rememberFolder(cwd);
+      setPalette(false);
+      return null;
+    } finally {
+      creating.current = false;
+    }
+  };
+
+  /** Palette prompt: into the focused pane's terminal as a paste, without Enter (D-032). */
+  const pastePrompt = (text: string) => {
+    flushSync(() => setPalette(false));
+    const input = document.querySelector<HTMLTextAreaElement>(".pane-focused .xterm-helper-textarea");
+    if (input) pasteInto(input, text);
+    else toast("Prompt tidak ditempel: tidak ada pane berjalan yang fokus.");
   };
 
   const openLauncher = (target: LauncherTarget, pick?: string) => {
@@ -584,7 +636,7 @@ function App() {
   useEffect(() => {
     // Capture phase, so a shortcut never reaches xterm.js; unmapped keys (⌘C, ⌘V, Ctrl, ⌥) pass through untouched.
     const onKey = (e: KeyboardEvent) => {
-      if (closing !== null || launcher !== null || peerAsk !== null || settingsAt !== null) return;
+      if (closing !== null || launcher !== null || peerAsk !== null || settingsAt !== null || palette) return;
       const action = shortcut(e);
       if (!action) return;
       e.preventDefault();
@@ -622,6 +674,8 @@ function App() {
         }
         case "settings":
           return setSettingsAt("agents");
+        case "prompts":
+          return setPalette(true);
       }
     };
     window.addEventListener("keydown", onKey, true);
@@ -629,6 +683,7 @@ function App() {
   });
 
   const closingPane = closing ? panes[closing] : undefined;
+  const focusedPane = active ? panes[active.focused] : undefined;
 
   return (
     <TerminalContext.Provider value={term}>
@@ -650,6 +705,7 @@ function App() {
               onSelectWorkspace={setActiveId}
               onFocusPane={focusPane}
               onSettings={() => setSettingsAt("agents")}
+              onPrompts={() => setPalette(true)}
             />
           ) : null}
           <main className="workspace">
@@ -752,6 +808,19 @@ function App() {
             home={home}
             onLaunch={launch}
             onClose={() => setLauncher(null)}
+          />
+        ) : null}
+        {palette ? (
+          <Palette
+            prompts={settings.prompts}
+            target={focusedPane?.ptyId != null ? `${focusedPane.id} ${focusedPane.agent}` : null}
+            folder={focusedPane?.cwd ?? active?.folder ?? home ?? ""}
+            recents={recents}
+            home={home}
+            onPaste={pastePrompt}
+            onSave={(prompts) => updateSettings({ prompts })}
+            onPreset={openPreset}
+            onClose={() => setPalette(false)}
           />
         ) : null}
         {settingsAt ? (

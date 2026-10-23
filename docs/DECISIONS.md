@@ -471,3 +471,28 @@ halaman merek OpenAI menjawab 403 (hanya terbaca lewat cuplikan pencarian, belum
 - Uji di aplikasi setelah perbaikan: p1 diberi kata kode, ⌘Q → `layout.json` menyimpan sesi p1; buka lagi, Jalankan
   p1 → proses berjalan dengan `--resume`, riwayat lama tampil, Claude menjawab kata kodenya. Tombol pane pulihan belum
   memberi tahu bahwa percakapan dilanjutkan.
+
+## D-032 — Pustaka prompt dan preset sesi (2026-10-23)
+- Ide dari BridgeMind (RESEARCH §3: pustaka Prompts, preset Solo/Pair). Hanya konsep; teks dan nama UI milik kita.
+- **Pustaka prompt** disimpan di `settings.json` sebagai `prompts: [{name, text}]` lewat `settings_set` yang sudah ada
+  (tanpa command baru); patch mengganti seluruh daftar. Validasi di Rust (`settings::validate_prompts`): paling banyak
+  100 prompt, nama 1–80 karakter satu baris dan unik tanpa beda huruf besar/kecil, teks 1–10.000 karakter, karakter
+  kontrol hanya tab/LF/CR. ESC ditolak karena teks berisi `ESC[201~` bisa mengakhiri bracketed paste lebih awal lalu
+  menjalankan sisanya. Kunci asing (mis. `args`) ditolak. UI mencerminkan aturan yang sama hanya untuk menolak di tempat.
+- **Menempel**: palet `⌘P` (bebas di UI-UX §7; `⌘K` dihindari karena di terminal macOS berarti hapus layar) mengirim
+  event `paste` sintetis ke textarea xterm.js pane yang fokus. Jalurnya sama persis dengan `⌘V`: xterm.js membungkus
+  dengan bracketed paste bila program memintanya, `onData` → `pane_write`, dan jam ketikan pane (`inputClock`, dipicu
+  event `paste`) menandainya `typed`, jadi antrean pesan menunda kiriman agen seperti saat orang mengetik. Tidak ada
+  perubahan di `src/pane`. Baris baru di ujung dibuang dan Enter tidak ditambahkan. Batasan: di program tanpa bracketed
+  paste, baris baru di tengah teks berlaku sebagai Enter, sama seperti `⌘V`.
+- **Preset sesi** adalah konstanta di `src/prompts/prompts.ts`: id agen dari katalog + arah split, tanpa argumen, flag,
+  atau env (aturan 4); peluncuran lewat `pane_create` yang sama dengan peluncur, jadi argumen hanya dari katalog. Semua
+  atau tidak sama sekali: bila satu pane gagal, pane yang sudah jalan ditutup dan workspace dibuang.
+- Belum: preset buatan pengguna (menunggu permintaan; bentuknya sudah bisa disimpan seperti prompt), variabel di prompt,
+  kirim prompt ke beberapa pane sekaligus.
+- Uji: `cargo test` (`settings::tests::prompt_library_is_validated`), vitest `src/prompts/prompts.test.tsx` (cari,
+  simpan, ⌘P, susunan preset, tampilan palet). Di aplikasi (2026-10-23, Vite di port 1430 karena 1420 dipakai checkout
+  utama): prompt dua baris disimpan lewat palet dan masuk `settings.json`; ditempel ke pane zsh → tampil sebagai
+  bracketed paste, tidak dijalankan; ditempel ke Claude Code 2.1.309 → dua baris di kotak input, tidak terkirim;
+  preset Pair → workspace baru, Claude Code kiri (fokus), Codex kanan, keduanya siap. Penanda `typed` tidak diamati
+  langsung; ia mengikuti jam ketikan pane yang dipicu event `paste` yang sama dengan `⌘V`.

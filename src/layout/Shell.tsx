@@ -64,6 +64,7 @@ export function Sidebar({
   onSelectWorkspace,
   onFocusPane,
   onSettings,
+  onPrompts,
 }: {
   workspaces: WorkspaceView[];
   active: WorkspaceView | null;
@@ -72,6 +73,8 @@ export function Sidebar({
   onSelectWorkspace: (id: number) => void;
   onFocusPane: (id: string) => void;
   onSettings: () => void;
+  /** Opens the prompt palette (⌘P, D-032). */
+  onPrompts?: () => void;
 }) {
   return (
     <nav className="sidebar" aria-label="Workspace dan pane">
@@ -149,6 +152,12 @@ export function Sidebar({
         </>
       ) : null}
 
+      {onPrompts ? (
+        <button type="button" className="row sidebar-prompts" title="Prompt dan preset (⌘P)" onClick={onPrompts}>
+          <Icon name="copy" />
+          Prompt
+        </button>
+      ) : null}
       <button type="button" className="row sidebar-settings" title="Settings (⌘,)" onClick={onSettings}>
         <Icon name="settings" />
         Settings

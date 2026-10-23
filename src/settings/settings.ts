@@ -25,15 +25,25 @@ export type Limits = {
   loop_guard: number;
 };
 
+/** Prompt library entry (D-032); the core checks sizes, unique names, and control characters. */
+export type Prompt = { name: string; text: string };
+
 export type Settings = {
   spawn_enabled: boolean;
   peer_default: boolean;
   limits: Limits;
   terminal: TerminalSettings;
+  prompts: Prompt[];
 };
 
-/** A partial Settings for `settings_set`. */
-export type Patch = { [K in keyof Settings]?: Settings[K] extends object ? Partial<Settings[K]> : Settings[K] };
+/** A partial Settings for `settings_set`; a list is replaced whole. */
+export type Patch = {
+  [K in keyof Settings]?: Settings[K] extends unknown[]
+    ? Settings[K]
+    : Settings[K] extends object
+      ? Partial<Settings[K]>
+      : Settings[K];
+};
 
 export const DEFAULTS: Settings = {
   spawn_enabled: false,
@@ -47,6 +57,7 @@ export const DEFAULTS: Settings = {
     theme: "system",
     screen_reader: false,
   },
+  prompts: [],
 };
 
 export type Range = { min: number; max: number; step: number };
