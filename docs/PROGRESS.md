@@ -6,8 +6,8 @@ Terakhir diperbarui: 2026-10-23. Phase 0–3 selesai (MVP); sisa Phase 4 dan uji
 
 **Ide dari riset BridgeMind/MXterm (RESEARCH §2–3), di `main`, belum di-push:** D-028 alasan pesan menunggu di chip
 (diuji di aplikasi dengan dua pane Claude), D-029 kuota 5 jam/7 hari + konteks Claude dari statusline resmi, D-030 pane
-Claude pulihan melanjutkan percakapan (`--resume`). D-029/D-030 diuji dengan Claude 2.1.309 asli di luar aplikasi;
-**badge kuota dan tombol jalankan ulang pane pulihan belum dilihat di aplikasi.** Kandidat berikutnya: klaim berkas,
+Claude pulihan melanjutkan percakapan (`--resume`, sesi disimpan ulang saat aplikasi keluar). Ketiganya diuji di
+aplikasi dengan Claude 2.1.309. Kandidat berikutnya: klaim berkas,
 pustaka prompt/preset, OSC 133, papan task, tolak spawn di atas ambang kuota.
 
 **T3.2 sudah di-merge ke main dan di-push (2026-10-23)** (`pane_spawn` + audit + worktree + uji alur B, D-024). MVP

@@ -268,6 +268,8 @@ pub struct Store {
     /// `None` without an app data dir: the layout is not kept.
     path: Option<PathBuf>,
     restored: Mutex<Option<Layout>>,
+    /// Last layout the WebView saved, written once more on exit ([`Self::save_last`]).
+    last: Mutex<Option<Layout>>,
     /// Saves come from async commands; one write at a time keeps the temporary file theirs alone.
     writing: Mutex<()>,
 }
@@ -284,6 +286,7 @@ impl Store {
         Self {
             path,
             restored: Mutex::new(Some(layout)),
+            last: Mutex::new(None),
             writing: Mutex::new(()),
         }
     }
@@ -298,6 +301,7 @@ impl Store {
     /// Validates, takes each pane's worktree from the registry, writes.
     pub fn save(&self, layout: Layout, panes: &Panes) -> Result<(), String> {
         let mut layout = layout.validated()?;
+        *self.last.lock().unwrap_or_else(PoisonError::into_inner) = Some(layout.clone());
         {
             let reg = panes::lock(panes);
             for p in layout
@@ -314,6 +318,18 @@ impl Store {
         };
         let _one = self.writing.lock().unwrap_or_else(PoisonError::into_inner);
         save(path, &layout).map_err(|e| format!("{FILE} tidak bisa disimpan: {e}"))
+    }
+
+    /// On exit, before the panes stop: the WebView saves only when the layout changes, but a Claude session id
+    /// (D-030) appears after the first turn, so the last layout is written again with the sessions of now.
+    // ponytail: a crash loses sessions that appeared since the last change; save on each statusline if that bites.
+    pub fn save_last(&self, panes: &Panes) -> Result<(), String> {
+        let last = self
+            .last
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone();
+        last.map_or(Ok(()), |l| self.save(l, panes))
     }
 }
 
@@ -576,6 +592,13 @@ mod tests {
         assert_eq!(
             again.workspaces[0].panes[1].session, None,
             "the WebView cannot plant one"
+        );
+        // On exit the last layout is written again: what the registry knows now is kept.
+        fs::remove_file(&f).expect("removed");
+        store.save_last(&reg).expect("saved again");
+        assert_eq!(
+            load(&f).0.workspaces[0].panes[0].session.as_deref(),
+            Some(id)
         );
     }
 

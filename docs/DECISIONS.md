@@ -448,8 +448,8 @@ halaman merek OpenAI menjawab 403 (hanya terbaca lewat cuplikan pencarian, belum
   `5j 31% · ktx 5%`, tooltip kuota 7 hari + waktu reset, amber mulai 80%. Codex tidak: kuotanya hanya dari kredensial.
 - Belum: menolak `pane_spawn` di atas ambang kuota (MXterm 85%).
 - Uji: `cargo test` (`usage::tests` dengan JSON 2.1.309 nyata), argumen dari `catalogue.toml` dijalankan ke Claude
-  2.1.309 asli dengan path berspasi → berkas terisi kuota, konteks, `session_id`. Badge belum dilihat di aplikasi:
-  jendela dev ada di Space lain dan tidak bisa dijadikan frontmost.
+  2.1.309 asli dengan path berspasi → berkas terisi kuota, konteks, `session_id`. Di aplikasi (2026-10-23): setelah
+  giliran pertama header p1 menampilkan `5j 41% · ktx 6%`; baris statusline Claude sendiri kosong.
 
 ## D-030 — Pane Claude yang dipulihkan melanjutkan percakapannya (2026-10-23)
 - Ide dari BridgeMind v0.3.4 (RESEARCH §3). Melengkapi D-025: tata letak sudah kembali, kini percakapan juga.
@@ -464,5 +464,10 @@ halaman merek OpenAI menjawab 403 (hanya terbaca lewat cuplikan pencarian, belum
   membuang sesi lama.
 - Uji: unit (katalog, registri, layout). Claude 2.1.309 asli dengan argumen katalog + `--resume <id>` di folder yang
   sama: riwayat lama tampil dan statusline melaporkan id yang sama, jadi simpan berikutnya tetap menyimpannya. Belum
-  diklik di aplikasi (jendela dev tidak bisa dijadikan frontmost saat diuji). Tombol pane pulihan belum memberi tahu
-  bahwa percakapan dilanjutkan.
+  diklik di aplikasi, dan uji di aplikasi menemukan bug: WebView menyimpan `layout.json` hanya saat tata letak
+  berubah, padahal id sesi baru ada setelah giliran pertama, jadi sesi tidak pernah tersimpan. Perbaikan: core
+  menyimpan ulang tata letak terakhir di `RunEvent::Exit`, sebelum pane dihentikan (`layout::Store::save_last`).
+  Batasan: saat crash, sesi yang muncul sejak perubahan tata letak terakhir hilang.
+- Uji di aplikasi setelah perbaikan: p1 diberi kata kode, ⌘Q → `layout.json` menyimpan sesi p1; buka lagi, Jalankan
+  p1 → proses berjalan dengan `--resume`, riwayat lama tampil, Claude menjawab kata kodenya. Tombol pane pulihan belum
+  memberi tahu bahwa percakapan dilanjutkan.

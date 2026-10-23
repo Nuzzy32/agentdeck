@@ -464,6 +464,11 @@ pub fn run() -> tauri::Result<()> {
             // Exit fires once on every way out: last window closed, ⌘Q, app.exit (TERM-05).
             if let tauri::RunEvent::Exit = event {
                 use tauri::Manager;
+                // Before the panes stop, while their statusline files still name their sessions (D-030).
+                let panes = app.state::<panes::Panes>();
+                if let Err(e) = app.state::<layout::Store>().save_last(&panes) {
+                    eprintln!("agentdeck: {e}");
+                }
                 app.state::<pty::PaneManager>().close_all();
             }
         });
