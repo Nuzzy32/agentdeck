@@ -494,3 +494,14 @@ halaman merek OpenAI menjawab 403 (hanya terbaca lewat cuplikan pencarian, belum
   menambah) mematikan hook; tema yang menyusun ulang `PS1` di precmd-nya sendiri menghapus `B` (tidak dipakai UI).
   Prompt instan p10k tercetak sebelum precmd pertama, jadi prompt pertama tanpa A. Perintah di dalam `ssh`/`tmux`
   tidak ditandai. Penanda ikut hilang bersama scrollback.
+- Uji: `cargo test` (`launch::tests`: hanya zsh mendapat `ZDOTDIR`; folder 0777/symlink ditolak; zsh asli dengan
+  `$HOME` palsu: `.zshenv`/`.zshrc` pengguna tetap terbaca, `ZDOTDIR` hilang, urutan `A B C D;1 … A B` dengan precmd
+  pengguna yang mengembalikan 7 lebih dulu). vitest `src/pane/commands.test.ts` (parser, prompt kosong dibuang,
+  loncat). zsh dengan dotfile asli pemilik di PTY (`script`): `false` → `D;1`, `echo` → `D;0`.
+- Uji di aplikasi (2026-10-23, Vite di port 1440 karena 1420 dipakai checkout utama): aplikasi jalan dengan env
+  bersih, tetapi `screencapture -l` gagal ("could not create image from window") dan ketikan ⌘Q tidak sampai, jadi
+  izin Screen Recording/Accessibility untuk Claude Code 2.1.308 belum ada; pane shell tidak diklik di aplikasi. Sebagai
+  gantinya `TerminalPane` asli dirender di browser lewat Vite yang sama dengan `mockIPC`, diberi byte rekaman zsh
+  asli: batang merah di `false` dan `ls /nope` (tooltip `Kode exit 1`), hijau di `echo`, prompt kosong tanpa batang,
+  ⌘↑ loncat sampai perintah pertama, ⌘↓ ke berikutnya lalu ke bawah, tidak ada byte yang ditulis ke PTY. Belum
+  terbukti di WebView Tauri: jalur `panes.rs` → `launch::shell` → PTY (tercakup tes unit) dan tampilan di WKWebView.
