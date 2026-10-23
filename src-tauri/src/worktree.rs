@@ -22,7 +22,8 @@ const GIT_ENV: [&str; 6] = [
     "GIT_CEILING_DIRECTORIES",
 ];
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+/// Saved in `layout.json` (T4.3) so a restored child still cleans up its worktree when closed.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Worktree {
     /// Main working tree of the repository (canonical).
     pub repo: PathBuf,
@@ -155,6 +156,23 @@ pub fn create(repo: &Path, name: &str) -> Result<Worktree, String> {
     })
 }
 
+/// A worktree read back from `layout.json` (T4.3) is trusted only while it is still exactly what [`create`] made:
+/// `<repo>/.worktrees/<name>`, the top of its own checkout, on branch `agent/<name>`, with both paths canonical. Closing
+/// a pane removes the worktree and deletes the branch, so a hand-edited file must not point that at anything else.
+pub fn still_ours(wt: &Worktree) -> bool {
+    let (Ok(repo), Ok(path)) = (wt.repo.canonicalize(), wt.path.canonicalize()) else {
+        return false;
+    };
+    let name = path.file_name().and_then(|n| n.to_str());
+    repo == wt.repo
+        && path == wt.path
+        && path.parent() == Some(repo.join(DIR).as_path())
+        && name.is_some_and(|n| wt.branch == format!("{BRANCH_PREFIX}{n}"))
+        && git_ok(&path, &["rev-parse", "--show-toplevel"]).is_ok_and(|t| Path::new(&t) == path)
+        && git_ok(&path, &["symbolic-ref", "--short", "HEAD"]).is_ok_and(|b| b == wt.branch)
+        && repo_root(&path).is_some_and(|r| r == repo)
+}
+
 /// Uncommitted or untracked files, or commits on the branch since it started.
 pub fn changed(wt: &Worktree) -> Result<bool, String> {
     let status = git_ok(&wt.path, &["status", "--porcelain"])?;
@@ -246,6 +264,53 @@ pub(crate) mod tests {
         assert_eq!(cleanup(&wt), Cleanup::Removed);
         assert!(!wt.path.exists());
         assert!(!branch_exists(&r, "agent/p2"));
+        let _ = std::fs::remove_dir_all(&r);
+    }
+
+    #[test]
+    fn only_an_unchanged_record_of_our_worktree_is_trusted() {
+        let r = repo("ours");
+        let wt = create(&r, "p4").unwrap();
+        assert!(still_ours(&wt));
+        git_ok(&r, &["branch", "feature-x"]).unwrap();
+        let bad = [
+            Worktree {
+                branch: "feature-x".into(),
+                ..wt.clone()
+            },
+            Worktree {
+                branch: "agent/p5".into(),
+                ..wt.clone()
+            },
+            Worktree {
+                path: r.join(DIR),
+                ..wt.clone()
+            },
+            Worktree {
+                path: wt.path.join("src"),
+                ..wt.clone()
+            },
+            Worktree {
+                path: r.clone(),
+                branch: "agent/".into(),
+                ..wt.clone()
+            },
+            Worktree {
+                repo: r.join("src"),
+                ..wt.clone()
+            },
+            Worktree {
+                path: r.join(".worktrees/p9"),
+                branch: "agent/p9".into(),
+                ..wt.clone()
+            },
+        ];
+        for b in &bad {
+            assert!(!still_ours(b), "{b:?} trusted");
+        }
+        // Its checkout moved to another branch: no longer ours to delete.
+        git_ok(&wt.path, &["checkout", "--quiet", "-b", "agent/other"]).unwrap();
+        assert!(!still_ours(&wt));
         let _ = std::fs::remove_dir_all(&r);
     }
 

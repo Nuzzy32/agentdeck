@@ -138,15 +138,17 @@ export function PaneView({
       {pane.status === "exited" ? (
         <div className="pane-ribbon" role="status">
           <span>
-            {pane.agent} selesai (kode {pane.exitCode ?? "?"})
+            {pane.restored ? `${pane.agent} belum dijalankan` : `${pane.agent} selesai (kode ${pane.exitCode ?? "?"})`}
           </span>
           <span className="pane-spacer" />
           <button type="button" className="btn btn-small" onClick={actions.onRestart}>
-            Jalankan ulang
+            {pane.restored ? "Jalankan" : "Jalankan ulang"}
           </button>
-          <button type="button" className="btn btn-small" onClick={actions.onShellHere}>
-            Buka shell di sini
-          </button>
+          {pane.restored && !pane.agentId ? null : (
+            <button type="button" className="btn btn-small" onClick={actions.onShellHere}>
+              Buka shell di sini
+            </button>
+          )}
         </div>
       ) : null}
     </section>

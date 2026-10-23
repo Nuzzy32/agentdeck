@@ -354,3 +354,28 @@ ditutup/keluar → `denied`.
   sendiri; kartu tidak dijawab → `APPROVAL_TIMEOUT`; sakelar mati → `SPAWN_OFF` + toast; kartu ke-6 dalam 10 menit →
   `RATE`; dua anak `worktree: true` → `.worktrees/p4|p5`, tutup yang bersih menghapus worktree + branch, yang berubah
   dibiarkan + toast. Ulangi bagian Codex saat server OpenAI lega.
+
+## D-025 — T4.3: pemulihan tata letak (2026-10-23)
+- **Tampilan pane yang dipulihkan (keputusan pemilik):** tidak ada proses yang jalan sendiri, termasuk shell. Setiap pane
+  kembali sebagai `exited` dengan label "belum dijalankan" dan tombol **Jalankan** / **Buka shell di sini**. Hubungan
+  anak–induk ikut pulih (anak tanpa induk yang pulih menjadi pane biasa); zoom tidak dipulihkan; berkas rusak hanya
+  dicatat di log dan aplikasi mulai kosong (tanpa toast).
+- **Siapa menulis:** core Rust (`layout.rs`), bukan `localStorage`, karena isi berkas menentukan apa yang diluncurkan
+  saat Jalankan. WebView mengirim potret setiap perubahan (jeda 400 ms) lewat `layout_save`; core memvalidasinya dan
+  mengisi worktree dari registri, tidak pernah dari WebView. Tulis atomik seperti `settings.json`.
+- **Id:** id pane `pN` dan nomor workspace lama dipakai lagi; penghitung berlanjut di atas angka tertinggi, jadi id
+  tetap tidak dipakai dua kali dalam satu run. Berkas dibaca di `setup` dan pane didaftarkan sebelum WebView meminta,
+  jadi tidak ada balapan dengan pane baru. Id dan nomor dibatasi ≤ 1.000.000 (penghitung tidak meluap).
+- **Validasi (`Layout::validated`, tes unit):** versi 1, ≤ 16 workspace, ≤ 64 pane, teks ≤ 200 karakter tanpa karakter
+  kontrol, path absolut, rasio split di (0, 1), kedalaman pohon ≤ 32, setiap pane tepat satu daun di workspace-nya.
+  `focused`, `parent`, dan `active` yang menunjuk ke yang tidak ada diperbaiki, bukan ditolak.
+- **Worktree:** dipasang lagi hanya bila masih persis buatan `worktree::create` (`still_ours`): path dan repo kanonik
+  sama dengan yang tersimpan, `<repo>/.worktrees/<nama>` adalah puncak checkout-nya sendiri, dan branch-nya
+  `agent/<nama>` yang sedang di-checkout. Ini mencegah berkas yang diubah tangan membuat penutupan pane menghapus
+  branch lain. Batasan: `base` tetap dipercaya dari berkas.
+- **Batasan:** setelah WebView dimuat ulang (atau `layout_restore` gagal), run itu tidak menyimpan tata letak, supaya
+  berkas tidak tertimpa kosong. Perubahan dalam 400 ms terakhir sebelum keluar hilang.
+- **Uji di aplikasi (2026-10-23, `pnpm tauri dev`, pane shell):** 2 shell split kanan → keluar → dibuka lagi: workspace,
+  split, dan fokus pulih, kedua pane "belum dijalankan"; Jalankan menghidupkan shell di foldernya; pane baru dapat p3;
+  menutup pane pulihan yang belum dijalankan memperbarui berkas. Anak agen dan worktree pulihan hanya teruji lewat tes
+  unit (Claude di pane uji menolak bekerja: "organization has disabled Claude subscription access").

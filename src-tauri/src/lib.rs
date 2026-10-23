@@ -2,6 +2,7 @@ pub mod approvals;
 pub mod catalogue;
 pub mod delivery;
 pub mod launch;
+pub mod layout;
 pub mod mcp;
 pub mod panes;
 pub mod policy;
@@ -360,6 +361,8 @@ pub fn run() -> tauri::Result<()> {
             }
             let panes = panes::Panes::default();
             settings::apply(&settings::get(), &mut panes::lock(&panes));
+            // Before the WebView asks: restored panes hold their ids before any new pane is opened.
+            let layout = layout::Store::open(data_dir.as_deref().ok(), &panes);
             // Without a data dir messages still flow, only unlogged.
             let store = match data_dir {
                 Ok(dir) => {
@@ -405,6 +408,7 @@ pub fn run() -> tauri::Result<()> {
                 }
             };
             app.manage(panes);
+            app.manage(layout);
             app.manage(pm);
             app.manage(engine);
             app.manage(status);
@@ -416,6 +420,8 @@ pub fn run() -> tauri::Result<()> {
             panes::pane_close,
             panes::workspace_create,
             panes::workspace_close,
+            layout::layout_restore,
+            layout::layout_save,
             agents_list,
             agents_info,
             agent_set_path,

@@ -19,6 +19,7 @@ use crate::delivery::{
     self, Action, Delivery, DropReason, PaneStatus, Poll, Sender, State as MsgState, Target,
 };
 use crate::launch::{self, LaunchError, Mcp};
+use crate::layout::Layout;
 use crate::mcp::report::Report;
 use crate::mcp::server::McpStatus;
 use crate::policy::{
@@ -421,6 +422,47 @@ impl Registry {
             pty: e.pty,
             worktree: e.worktree,
         })
+    }
+
+    /// `layout.json` at startup (T4.3): its workspaces and panes, all exited and without tokens, under their old
+    /// ids. The counters continue above them, so no id is given twice in a run. Called on an empty registry.
+    pub fn restore(&mut self, layout: &Layout) {
+        let now = Instant::now();
+        for w in &layout.workspaces {
+            let ws = Workspace {
+                peer: self.peer_default,
+                ..Workspace::default()
+            };
+            self.workspaces.insert(w.id, ws);
+            self.next_workspace = self.next_workspace.max(w.id);
+            for p in &w.panes {
+                let n =
+                    p.id.strip_prefix('p')
+                        .and_then(|n| n.parse().ok())
+                        .unwrap_or(0);
+                self.next_pane = self.next_pane.max(n);
+                self.panes.push(Entry {
+                    id: p.id.clone(),
+                    workspace: w.id,
+                    agent: p.agent.clone(),
+                    title: p.title.clone(),
+                    cwd: p.cwd.clone().into(),
+                    parent: p.parent.clone(),
+                    pty: None,
+                    generation: 0,
+                    screen: None,
+                    status: None,
+                    started: now,
+                    exited: true,
+                    report: None,
+                    worktree: p.worktree.clone(),
+                });
+            }
+        }
+    }
+
+    pub fn worktree_of(&self, id: &str) -> Option<Worktree> {
+        self.panes.iter().find(|e| e.id == id)?.worktree.clone()
     }
 
     /// Id the next new pane gets, unless another opens first (only used to name a worktree).
@@ -1035,6 +1077,53 @@ mod tests {
 
     fn exited() -> PaneEvent {
         PaneEvent::Exited { code: Some(0) }
+    }
+
+    #[test]
+    fn restored_panes_wait_keep_ids_and_run_again() {
+        use crate::layout::{Layout, SavedPane, SavedWorkspace, Tree};
+        let pane = |id: &str, parent: Option<&str>| SavedPane {
+            id: id.into(),
+            agent: Some("claude-code".into()),
+            name: "Claude Code".into(),
+            title: "t".into(),
+            cwd: "/".into(),
+            parent: parent.map(Into::into),
+            worktree: None,
+        };
+        let layout = Layout {
+            version: 1,
+            active: Some(4),
+            workspaces: vec![SavedWorkspace {
+                id: 4,
+                name: "w".into(),
+                folder: "/".into(),
+                tree: Tree::Leaf { pane: "p2".into() },
+                focused: "p2".into(),
+                panes: vec![pane("p2", None), pane("p7", Some("p2"))],
+            }],
+        };
+        let mut r = Registry::default();
+        r.restore(&layout);
+        assert!(!r.running("p2") && !r.running("p7"));
+        assert_eq!(r.list("p7").map(|l| l.panes.len()), Some(2));
+        // Nothing resolves until the person runs it; then it is a child of p2 again, with its own token.
+        assert_eq!(r.create_workspace(), 5);
+        assert_eq!(r.open(&spec(4, None)).unwrap().id, "p8");
+        let again = r
+            .open(&Spec {
+                pane: Some("p7".into()),
+                ..spec(4, Some("claude-code"))
+            })
+            .unwrap();
+        assert_eq!(again.id, "p7");
+        let token = again.token.expect("agent token");
+        assert_eq!(r.resolve(token.expose()).as_deref(), Some("p7"));
+        assert!(r.running("p7"));
+        assert_eq!(
+            r.entry("p7").and_then(|e| e.parent.clone()).as_deref(),
+            Some("p2")
+        );
     }
 
     #[test]

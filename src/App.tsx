@@ -22,6 +22,7 @@ import {
   type Workspace,
 } from "./layout/model";
 import { PaneView } from "./layout/Pane";
+import { hydrate, type Layout, snapshot } from "./layout/persist";
 import {
   CloseDialog,
   EmptyState,
@@ -85,6 +86,16 @@ function saveRecents(list: string[]) {
   }
 }
 
+/** Quiet time before a layout change is written to `layout.json`. */
+const SAVE_MS = 400;
+
+let restoring: Promise<[Layout | null, string | null]> | null = null;
+/** `layout_restore` hands the layout over once per run, so both StrictMode effects share one call. */
+function restoreOnce() {
+  restoring ??= Promise.all([invoke<Layout | null>("layout_restore"), homeDir().catch(() => null)]);
+  return restoring;
+}
+
 /** `pane_create` rejects with a `LaunchError`; anything else (IPC failure) becomes one. */
 function toLaunchError(e: unknown): LaunchError {
   if (typeof e === "object" && e !== null && "message" in e && typeof e.message === "string") {
@@ -131,6 +142,36 @@ function App() {
     homeDir().then(setHome, (e: unknown) => console.error("homeDir", e));
     void refreshAgents();
   }, []);
+
+  // T4.3: the layout of the last run comes back once, every pane waiting (D-025). Saving starts only after the core
+  // handed it over, so an empty render never overwrites the file. Merged, not replaced: StrictMode runs this twice.
+  // ponytail: after a WebView reload (or a failed restore) the core has nothing to hand over and this run saves
+  // nothing; give `layout_restore` the registry's current layout if reloads ever matter outside development.
+  const [layoutReady, setLayoutReady] = useState(false);
+  useEffect(() => {
+    restoreOnce().then(
+      ([layout, home]) => {
+        if (layout) {
+          const h = hydrate(layout, home, () => ids.current.spawn++);
+          setPanes((all) => ({ ...h.panes, ...all }));
+          setWorkspaces((list) => [...h.workspaces.filter((w) => !list.some((x) => x.id === w.id)), ...list]);
+          setActiveId((a) => a ?? h.active);
+        }
+        setLayoutReady(layout !== null);
+      },
+      (e: unknown) => console.error("layout_restore", e),
+    );
+  }, []);
+  const layoutJson = layoutReady ? JSON.stringify(snapshot(workspaces, panes, activeId)) : null;
+  useEffect(() => {
+    if (layoutJson === null) return;
+    // ponytail: changes in the last SAVE_MS before quitting are lost; save on window close if that ever bites.
+    const t = setTimeout(
+      () => invoke("layout_save", { layout: JSON.parse(layoutJson) }).catch((e: unknown) => console.error("layout_save", e)),
+      SAVE_MS,
+    );
+    return () => clearTimeout(t);
+  }, [layoutJson]);
 
   useEffect(() => collab.start(), [collab]);
   // The core names workspaces by its own number; its message and loop guard commands take it as a string.
@@ -200,6 +241,7 @@ function App() {
       error: false,
       // The last report belonged to the old run.
       report: undefined,
+      restored: false,
       exitCode: undefined,
       failed: undefined,
     };

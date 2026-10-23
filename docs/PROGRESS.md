@@ -15,15 +15,18 @@ Terakhir diperbarui: 2026-10-23. Phase 0–3 selesai (MVP); sisa Phase 4 dan uji
 - `pane_read` dipanggil agen asli; pesan menunggu saat kotak input berisi ketikan orang (baru di fake-agent).
 - Notifikasi macOS kartu persetujuan (perlu dilihat dan diklik pemilik).
 - 6 pane agen aktif di MacBook Air M1 8 GB tanpa UI tersendat.
+- Claude Code di pane agentdeck (2026-10-23, 2.1.308) menolak bekerja: "Your organization has disabled Claude subscription
+  access for Claude Code" (header benar menampilkan "perlu login"). Masalah akun pemilik, bukan agentdeck; perlu
+  diselesaikan sebelum uji agen asli berikutnya.
 
-**Task tersisa:** T4.3 pulihkan tata letak; lihat header laporan anak dengan agen asli;
+**Task tersisa:** lihat header laporan anak dan anak/worktree yang dipulihkan (T4.3) dengan agen asli;
 tinjau T2.6; Phase 5 (nama + bundle id final, signing + notarisasi, updater, ikon, cek ulang ketentuan provider D-006).
 
 **Risiko/batasan yang diketahui:**
 - Agen tujuan yang tidak pernah melapor status lagi setelah ditempeli pesan menahan antreannya (belum terlihat).
 - Saat aplikasi crash: proses yang mengabaikan SIGHUP atau membuat sesi sendiri (Bash tool Claude) bisa tertinggal;
   pid yang dipakai ulang selama masa tenggang 3 s bisa ikut di-SIGKILL (`ponytail:` di `pty.rs`).
-- Worktree anak yang masih terbuka saat aplikasi keluar tidak dibersihkan.
+- Worktree anak yang masih terbuka saat aplikasi keluar tidak dibersihkan (kecuali anaknya dipulihkan T4.3 lalu ditutup).
 - `pane_read` mengembalikan saran samar Claude ("Try …") seperti teks biasa.
 - Claude di subfolder repo yang `CLAUDE.md`-nya mengimpor berkas di luar folder menampilkan dialog "Allow external
   CLAUDE.md file imports?" dan diam sampai dijawab.
@@ -76,6 +79,7 @@ merge, hapus worktree begitu masuk main, commit tanpa atribusi AI, push hanya at
 | T3.2 + T3.4 + T4.1 | `spawn.rs` (`pane_spawn`: validasi argumen, sakelar/`NESTED`/batas/rate dengan kartu menunggu dihitung sebagai anak, katalog + terpasang, `cwd` dikanonikalisasi di dalam folder pemanggil, kartu dengan batas waktu Settings, anak lewat `panes::start` dengan induk = pemanggil, `SPAWN_FAILED`), `worktree.rs` (`.worktrees/<id>` di `agent/<id>`, exclude lokal, hook mati; dihapus saat ditutup bila tanpa perubahan, dibiarkan + toast bila berubah), audit `spawn_*`/`pane_closed`, UI: anak di samping induk dengan lencana, event `pane-spawned`/`pane-event`/`spawn-refused`, toast. `"timeout":330000` di `--mcp-config` Claude (D-024) | Tes unit tiap kode galat, `cwd` + symlink keluar, rate/kartu menunggu, audit tanpa token, worktree dibuat/dihapus/dibiarkan; integrasi fake-agent: `CALL pane_spawn` → kartu → jawab → anak dengan induk benar → `pane_report` → RESULT di induk, DENIED, worktree. Uji di aplikasi dengan CLI asli: lihat T3.5 |
 | T3.5 | Alur B di `pnpm tauri dev` dengan Claude Code 2.1.308 + Codex 0.163.0 | Lulus kecuali bagian Codex (server "at capacity", juga `gpt-5.6-luna`): kartu disetujui setelah 95 s berhasil (perlu perbaikan timeout), Codex terbuka di samping dengan "anak p1", Claude Code sebagai peninjau pengganti melapor dan induk menerima RESULT; DENIED, APPROVAL_TIMEOUT, SPAWN_OFF + toast, RATE, worktree hapus/biarkan + toast. Rincian D-024 |
 | T4.6 | Pesan queued/paused > 10 menit ditandai `held`, `message_force` (abaikan sepi/ketikan/input, tetap tolak bila keluar/bracketed paste mati/dijeda), panel: chip + "Kirim sekarang" dengan konfirmasi | — |
+| T4.3 | `layout.rs` (`layout.json`: validasi + tulis atomik, dibaca di `setup`, pane didaftarkan sebagai `exited` dengan id lama), `Registry::restore`, `worktree::still_ours`, `layout_restore`/`layout_save`; UI `persist.ts` (potret + hidrasi), simpan dengan jeda 400 ms, pita "belum dijalankan" + Jalankan (D-025) | Tes unit Rust (validasi, berkas rusak, id, worktree palsu ditolak, registri) + vitest. Di aplikasi: 2 shell split → keluar → buka → pulih, Jalankan jalan, pane baru p3. Anak agen + worktree pulihan belum dicoba dengan agen asli |
 | T2.4 (sebagian) | `screen.rs`: `vt100` per pane, `read(lines)` (alternate screen dibatasi tinggi layar), bracketed paste, `input_state` Empty/HasText/Unknown untuk Claude dan Codex | "HasText" hanya diuji dengan byte buatan (belum ada log nyata berisi ketikan); tool `pane_read` belum |
 | T2.7 (sebagian) | `delivery.rs`: sanitasi, batas 8192 byte, penanda ≤ 256 byte, urutan tempel + 150 ms + Enter, FIFO maks 5, syarat siap dengan jam palsu, dropped saat keluar | Logika murni; disambungkan ke PTY/MCP di T2.7 |
 | T1.5 | Workspace sungguhan + pohon split (`src/layout/tree.ts`, `SplitView.tsx`), fokus, pintasan UI-UX §7 tanpa ⌘J (`keys.ts`), dialog tutup, toast, ukuran font terminal, seret pembatas; title bar overlay macOS | Data contoh `sample.ts` dihapus (tipe pindah ke `model.ts`); menu app diganti dari JS (`src/menu.ts`) karena menu bawaan Tauri memakai ⌘W untuk Close Window; diuji di `pnpm tauri dev` dengan harness sementara (54 cek, catatan kerja) Uji manual pemilik 2026-10-22 lulus: ⌘W dari keyboard fisik menutup pane (dialog), title bar overlay tidak menimpa teks dan bisa diseret. |
@@ -93,7 +97,6 @@ tidak di-merge); boleh dihapus dengan `git branch -D spike/s6`.
 ## Berikutnya
 - Ulangi alur B dengan Codex sebagai peninjau saat server OpenAI tidak "at capacity", termasuk kartu dijawab setelah
   90 s di Codex (`tool_timeout_sec=330`) dan Codex sebagai pemanggil `pane_spawn`.
-- T4.3 pulihkan tata letak.
 - Belum diuji manual: alur D (pengaman putaran di 12 pesan + pita), `pane_read` dari agen, pesan tertahan saat kotak input berisi teks.
 - T2.8: pengaman putaran + sakelar "Saling kirim" + panel Pesan di UI memakai perintah/event T2.7. T2.6: tinjau sisa.
 - Ulangi uji CLI asli T2.7 (`cargo test --test real_cli -- --ignored --nocapture`) saat Codex tidak "at capacity":

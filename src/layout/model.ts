@@ -54,6 +54,8 @@ export type Pane = {
   /** Spawn failed (UI-UX §3 "Gagal dijalankan"); no process. */
   failed?: LaunchError;
   parent?: string;
+  /** From `layout.json` (T4.3): never run in this app run; shown as exited with "belum dijalankan". */
+  restored?: boolean;
   report?: Report;
   pending: number;
   /** Core pane id from `pane_create`; null while spawning or after a failed spawn. */
@@ -94,7 +96,7 @@ export function statusLabel(pane: Pane): string {
     case "needs_you":
       return pane.kind ? NEEDS_LABEL[pane.kind] : "butuh kamu";
     case "exited":
-      return `selesai (kode ${pane.exitCode ?? "?"})`;
+      return pane.restored ? "belum dijalankan" : `selesai (kode ${pane.exitCode ?? "?"})`;
     case "unknown":
       return "tidak diketahui";
   }

@@ -77,6 +77,7 @@ xterm.js mengisi penuh. Font dan ukuran dari Settings. Tidak ada animasi di dala
 | Keadaan | Tampilan |
 |---|---|
 | Proses keluar | Pita di bawah pane: "Claude Code selesai (kode 0)" + tombol **Jalankan ulang** dan **Buka shell di sini**. Isi terminal tetap bisa digulir dan disalin. |
+| Dipulihkan (T4.3, D-025) | Setelah aplikasi dibuka lagi: label status "belum dijalankan", pita "Claude Code belum dijalankan" + **Jalankan** dan **Buka shell di sini** (pane shell hanya **Jalankan**). Tidak ada proses yang jalan sendiri. |
 | Gagal dijalankan | Badan pane berisi pesan galat (mis. "Tidak bisa menjalankan codex: izin ditolak") + **Coba lagi**. |
 | Pesan menunggu | Chip `1 pesan` di header; hover menampilkan pratinjau 3 baris; klik membuka panel Pesan pada pesan itu. |
 | Pesan sedang ditempel | Kilatan halus 150 ms di garis tepi pane (opacity saja). |
