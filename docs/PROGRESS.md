@@ -46,7 +46,7 @@ Lanjutkan mengirim pesan tertahan dan penghitung mulai lagi; Hentikan dan buang 
 `dropped` "stopped by the person at the loop guard", audit `loop_paused`. `pane_read` dipanggil Claude asli dan
 membaca layar pane lain dengan benar.
 
-**Keputusan tertunda pemilik:** D-019 (teruskan kunci API lewat daftar izin?). Diputuskan 2026-10-23: distribusi
+**Keputusan tertunda pemilik:** D-019 (teruskan kunci API lewat daftar izin?), D-034 (flag bypass untuk pane yang dibuka orang: a/b/c). Diputuskan 2026-10-23: distribusi
 pribadi, rilis publik ditunda, nama tetap agentdeck (D-026).
 
 **Catatan lingkungan pemilik:**

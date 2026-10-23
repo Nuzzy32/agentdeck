@@ -558,3 +558,19 @@ halaman merek OpenAI menjawab 403 (hanya terbaca lewat cuplikan pencarian, belum
 - Uji: unit (`policy` ambang dan rentang, `spawn` QUOTA_LOW sebelum kartu tanpa memakai slot, `mcp::claim` path
   keluar `cwd`/symlink/bentuk, `panes` tumpang tindih dan pelepasan, `mcp::tools` alur tool), integrasi HTTP
   (`tests/mcp_server.rs`: `CLAIMED` menyebut pemilik, `pane_list` memuat klaim). Belum diuji dengan agen asli.
+
+## D-034 — Peluncur multi-terminal ala MXterm; flag bypass untuk pane yang dibuka orang (TERTUNDA, 2026-10-23)
+- Permintaan pemilik: di dialog workspace baru pilih folder, jumlah terminal sekaligus (berapa Claude, berapa Codex),
+  sakelar "bypass izin untuk semua terminal", dan sakelar "worktree baru per terminal".
+- Acuan konsep: peluncur MXterm Pro (jumlah terminal per agen, satu sakelar bypass untuk semua, worktree per terminal).
+  Flag bypass dari dokumentasi CLI: Claude `--dangerously-skip-permissions`, Codex
+  `--dangerously-bypass-approvals-and-sandbox`.
+- Jumlah per agen dan worktree per terminal tidak bertentangan dengan apa pun: memperluas preset D-032 dan worktree T4.1.
+- **Bypass bertentangan dengan ARCHITECTURE §4 "Yang tidak pernah dilakukan"** (`--dangerously-*` dilarang total),
+  sementara PRD prinsip 2 hanya melarangnya untuk agen yang dibuka agen. Risiko utama (PRD §10): rantai prompt
+  injection — pesan `pane_send` dari agen lain dijalankan pane ber-bypass tanpa ada yang ditanya.
+- Pilihan untuk pemilik: (a) tidak ada bypass; (b) mode semi-otomatis tanpa `--dangerously-*` (Claude
+  `--permission-mode acceptEdits`, Codex `--full-auto`: sandbox tetap, edit di folder kerja tanpa tanya); (c) bypass
+  penuh hanya untuk pane yang dibuka orang, mati bawaan, dengan pagar: konfirmasi saat dinyalakan, badge merah di header,
+  pane ber-bypass tidak menerima `pane_send` dari peer, anak dari `pane_spawn` tetap tanpa bypass.
+- Status: menunggu keputusan pemilik. Bagian jumlah terminal dan worktree boleh dikerjakan lebih dulu.
