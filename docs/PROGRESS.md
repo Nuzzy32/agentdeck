@@ -16,8 +16,9 @@ Terakhir diperbarui: 2026-10-23. Phase 0–3 selesai (MVP); sisa Phase 4 dan uji
 - Notifikasi macOS kartu persetujuan (perlu dilihat dan diklik pemilik).
 - 6 pane agen aktif di MacBook Air M1 8 GB tanpa UI tersendat.
 
-**Task tersisa:**
-tinjau T2.6; Phase 5 (nama + bundle id final, signing + notarisasi, updater, ikon, cek ulang ketentuan provider D-006).
+**Task tersisa:** ulangi bagian Codex saat server OpenAI lega. Phase 5 pribadi: T5.1 ikon (`src-tauri/icons/source.svg`)
+selesai dan `pnpm tauri build` menghasilkan `.app` + `.dmg` bertanda tangan ad-hoc yang berjalan (MCP aktif, agen
+terdeteksi); T5.2 notarisasi dan T5.3 updater ditunda sampai rilis publik (D-026).
 
 **Risiko/batasan yang diketahui:**
 - Agen tujuan yang tidak pernah melapor status lagi setelah ditempeli pesan menahan antreannya (belum terlihat).
@@ -35,8 +36,8 @@ Lanjutkan mengirim pesan tertahan dan penghitung mulai lagi; Hentikan dan buang 
 `dropped` "stopped by the person at the loop guard", audit `loop_paused`. `pane_read` dipanggil Claude asli dan
 membaca layar pane lain dengan benar.
 
-**Keputusan tertunda pemilik:** D-026 (rilis publik ditunda sampai Anthropic menjawab soal Commercial Terms? catatan tidak berafiliasi di README?), D-019 (teruskan kunci API lewat daftar izin?), nama final + bundle id, distribusi
-pribadi atau publik.
+**Keputusan tertunda pemilik:** D-019 (teruskan kunci API lewat daftar izin?). Diputuskan 2026-10-23: distribusi
+pribadi, rilis publik ditunda, nama tetap agentdeck (D-026).
 
 **Catatan lingkungan pemilik:**
 - Izin Accessibility + Screen Recording diberikan ke binary Claude Code di

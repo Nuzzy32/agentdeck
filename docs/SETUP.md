@@ -98,7 +98,7 @@ Di `src-tauri/tauri.conf.json`:
 ## 6. Build untuk dipakai sendiri dan distribusi
 - **Pribadi:** `pnpm tauri build`, lalu salin `.app` ke `/Applications`. Tanpa identitas penandatangan, macOS mungkin
   meminta konfirmasi saat pertama dibuka.
-- **Distribusi (Phase 5):** butuh sertifikat Developer ID Application dan notarisasi. Tauri membaca
+- **Distribusi publik (ditunda, D-026):** butuh sertifikat Developer ID Application dan notarisasi. Tauri membaca
   `APPLE_SIGNING_IDENTITY` (atau `bundle.macOS.signingIdentity`), `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`,
   dan untuk notarisasi `APPLE_ID` + `APPLE_PASSWORD` + `APPLE_TEAM_ID` atau `APPLE_API_ISSUER` + `APPLE_API_KEY` +
   `APPLE_API_KEY_PATH` (https://v2.tauri.app/distribute/sign/macos/). Updater: `tauri-plugin-updater`, kunci dari

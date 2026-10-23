@@ -5,7 +5,7 @@ atau PR). Kolom **Butuh** menyebut task yang harus selesai lebih dulu; task tanp
 dikerjakan paralel (ditandai ∥). Setiap task selesai bila kriteria **Selesai bila** terpenuhi dan workflow di
 `AGENTS.md` dijalankan.
 
-Status per 2026-10-23: Phase 0–3 selesai (MVP: alur A, B, C lulus dengan CLI asli; bagian Codex di alur B dan alur D belum terbukti, lihat PROGRESS "Serah terima"). Phase 4: T4.1–T4.7 selesai. Berikutnya Phase 5. Perbarui baris ini saat task selesai.
+Status per 2026-10-23: Phase 0–3 selesai (MVP: alur A, B, C lulus dengan CLI asli; bagian Codex di alur B dan alur D belum terbukti, lihat PROGRESS "Serah terima"). Phase 4: T4.1–T4.7 selesai. Phase 5 untuk distribusi pribadi (D-026): T5.1 ikon selesai (nama dan bundle id tetap), T5.4 selesai; T5.2 dan T5.3 ditunda sampai rilis publik. Berikutnya Phase 5. Perbarui baris ini saat task selesai.
 
 ## Phase 0 — Spike kelayakan
 Panduan lengkap: `docs/PHASE-0.md`. Tidak ada kode produk.

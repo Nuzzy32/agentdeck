@@ -380,7 +380,7 @@ ditutup/keluar → `denied`.
   menutup pane pulihan yang belum dijalankan memperbarui berkas. Dengan Claude Code 2.1.309: anak `pane_spawn` dengan
   worktree pulih sebagai "anak p1" dan "belum dijalankan"; menutupnya menghapus worktree `agent/p2` yang bersih.
 
-## D-026 — T5.4: ketentuan provider diperiksa ulang (2026-10-23, menunggu keputusan pemilik)
+## D-026 — T5.4: ketentuan provider diperiksa ulang (2026-10-23)
 Dibaca 2026-10-23: code.claude.com/docs/en/legal-and-compliance, anthropic.com/legal/consumer-terms, artikel bantuan
 Claude tentang login dan Agent SDK, learn.chatgpt.com/docs/auth, repo `openai/codex` (Apache-2.0). Terms of Use dan
 halaman merek OpenAI menjawab 403 (hanya terbaca lewat cuplikan pencarian, belum terverifikasi).
@@ -401,3 +401,8 @@ halaman merek OpenAI menjawab 403 (hanya terbaca lewat cuplikan pencarian, belum
   OpenAI, bahwa pengguna memasang dan login sendiri, dan bahwa pemakaian paralel menghabiskan kuota paket pengguna.
   Tidak membundel binary agen, tidak ada mode ter-host, tidak ada jalan tanpa orang (pengaman putaran dan kartu
   persetujuan tetap). Terms of Use OpenAI dibuka manual di browser sebelum rilis.
+- **Keputusan pemilik (2026-10-23):** distribusi pribadi dulu; rilis publik ditunda sesuai usulan di atas. Nama tetap
+  `agentdeck` untuk sekarang. Akibatnya untuk Phase 5: tanpa notarisasi dan tanpa updater (build lokal
+  `pnpm tauri build`, pembaruan lewat `git pull` + build ulang); bundle id `local.agentdeck.desktop` tetap, sehingga
+  `settings.json`, `layout.json`, dan log yang sudah ada tetap terpakai. Ikon sendiri tanpa logo atau warna khas
+  provider. T5.2 (notarisasi) dan T5.3 (updater + halaman rilis) dibuka lagi bila rilis publik diputuskan.
