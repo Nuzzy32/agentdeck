@@ -442,7 +442,7 @@ halaman merek OpenAI menjawab 403 (hanya terbaca lewat cuplikan pencarian, belum
   Konsekuensi: di pane agentdeck statusline milik pengguna diganti (bukan dihapus dari berkasnya), baris statusline
   Claude kosong.
 - `usage.rs`: berkas ditulis proses agen, jadi tidak dipercaya. Dibaca ≤ 64 KB, hanya tiga kolom, persen dijepit
-  0–100, `session_id` hanya bila berbentuk UUID dan tidak dikirim ke UI (dipakai untuk melanjutkan percakapan).
+  0–100, `session_id` hanya bila berbentuk UUID; `pane_usage` tidak mengirimnya (dipakai D-030).
   Direktori dikosongkan saat start, berkas pane dihapus saat pane dijalankan (ulang).
 - UI memanggil `pane_usage` tiap 10 s untuk pane Claude yang berjalan di workspace yang tampil; badge header
   `5j 31% · ktx 5%`, tooltip kuota 7 hari + waktu reset, amber mulai 80%. Codex tidak: kuotanya hanya dari kredensial.
@@ -450,3 +450,19 @@ halaman merek OpenAI menjawab 403 (hanya terbaca lewat cuplikan pencarian, belum
 - Uji: `cargo test` (`usage::tests` dengan JSON 2.1.309 nyata), argumen dari `catalogue.toml` dijalankan ke Claude
   2.1.309 asli dengan path berspasi → berkas terisi kuota, konteks, `session_id`. Badge belum dilihat di aplikasi:
   jendela dev ada di Space lain dan tidak bisa dijadikan frontmost.
+
+## D-030 — Pane Claude yang dipulihkan melanjutkan percakapannya (2026-10-23)
+- Ide dari BridgeMind v0.3.4 (RESEARCH §3). Melengkapi D-025: tata letak sudah kembali, kini percakapan juga.
+- Id sesi diambil dari statusline (D-029), bukan dari berkas sesi Claude. `layout.json` menyimpan `session` per pane,
+  diisi dari registri saat simpan (seperti `worktree`): bacaan statusline run ini, atau sesi pulihan yang belum
+  dipakai. Saat dimuat, nilai yang bukan UUID dibuang (nilainya menjadi satu elemen argv).
+- Katalog: `resume_args = ["--resume", "{session}"]` untuk Claude; `{session}` hanya boleh di `resume_args`, sekali,
+  dan `resume_args` ikut cek flag bypass. Codex tidak punya `resume_args`: id sesinya hanya terlihat di berkas
+  sesinya sendiri, yang tidak dibaca.
+- Dipakai saat pane yang sama dijalankan ulang dengan agen yang sama dan tanpa tugas baru, termasuk pane yang keluar
+  di run ini. Sekali pakai: bila resume gagal (sesi hilang), run berikutnya mulai baru. Tugas baru atau agen lain
+  membuang sesi lama.
+- Uji: unit (katalog, registri, layout). Claude 2.1.309 asli dengan argumen katalog + `--resume <id>` di folder yang
+  sama: riwayat lama tampil dan statusline melaporkan id yang sama, jadi simpan berikutnya tetap menyimpannya. Belum
+  diklik di aplikasi (jendela dev tidak bisa dijadikan frontmost saat diuji). Tombol pane pulihan belum memberi tahu
+  bahwa percakapan dilanjutkan.

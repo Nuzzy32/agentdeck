@@ -100,7 +100,7 @@ fn window(w: Option<RawWindow>) -> Option<Window> {
 }
 
 /// `8-4-4-4-12` hex, the only shape passed on to `--resume`.
-fn is_uuid(s: &str) -> bool {
+pub fn is_uuid(s: &str) -> bool {
     let parts: Vec<&str> = s.split('-').collect();
     parts.len() == 5
         && parts

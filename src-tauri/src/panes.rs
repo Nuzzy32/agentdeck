@@ -68,6 +68,8 @@ struct Entry {
     report: Option<Report>,
     /// `pane_spawn { worktree: true }`: cleaned up when the person closes the pane (T4.1).
     worktree: Option<Worktree>,
+    /// Conversation of a restored pane (`layout.json`), resumed once on its next run (D-030).
+    session: Option<String>,
 }
 
 impl Entry {
@@ -122,6 +124,8 @@ pub struct Opened {
     pub screen: Option<Arc<Mutex<Screen>>>,
     /// PTY of the process this restart replaces.
     pub old_pty: Option<u32>,
+    /// Session to resume: a run again of the same agent without a task, when one is known (D-030).
+    pub resume: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -317,11 +321,15 @@ impl Registry {
             .agent
             .is_some()
             .then(|| Arc::new(Mutex::new(Screen::new(spec.rows, spec.cols))));
-        let (id, generation, old_pty) = match &spec.pane {
+        let (id, generation, old_pty, resume) = match &spec.pane {
             Some(id) => {
                 let e = self
                     .entry(id)
                     .ok_or_else(|| LaunchError::new(format!("Pane {id} sudah ditutup.")))?;
+                // This run's statusline first (the pane ran and exited), else the restored one; used once, so a
+                // resume that fails starts fresh next time.
+                let known = usage::read(id).and_then(|u| u.session).or(e.session.take());
+                let resume = known.filter(|_| e.agent == spec.agent && spec.task.is_none());
                 e.generation += 1;
                 e.agent = spec.agent.clone();
                 e.title = spec.title.clone();
@@ -330,7 +338,7 @@ impl Registry {
                 e.status = None;
                 e.started = now;
                 e.exited = false;
-                (id.clone(), e.generation, e.pty.take())
+                (id.clone(), e.generation, e.pty.take(), resume)
             }
             None => {
                 if !self.workspaces.contains_key(&spec.workspace) {
@@ -353,8 +361,9 @@ impl Registry {
                     exited: false,
                     report: None,
                     worktree: None,
+                    session: None,
                 });
-                (id, 0, None)
+                (id, 0, None, None)
             }
         };
         self.tokens.revoke(&id);
@@ -376,6 +385,7 @@ impl Registry {
             token,
             screen,
             old_pty,
+            resume,
         })
     }
 
@@ -466,6 +476,7 @@ impl Registry {
                     exited: true,
                     report: None,
                     worktree: p.worktree.clone(),
+                    session: p.session.clone(),
                 });
             }
         }
@@ -473,6 +484,14 @@ impl Registry {
 
     pub fn worktree_of(&self, id: &str) -> Option<Worktree> {
         self.panes.iter().find(|e| e.id == id)?.worktree.clone()
+    }
+
+    /// Conversation to save for pane `id`: this run's statusline reading, else the one restored and not used yet.
+    pub fn session_of(&self, id: &str) -> Option<String> {
+        let e = self.panes.iter().find(|e| e.id == id)?;
+        usage::read(id)
+            .and_then(|u| u.session)
+            .or_else(|| e.session.clone())
     }
 
     /// Id the next new pane gets, unless another opens first (only used to name a worktree).
@@ -987,7 +1006,15 @@ pub fn start(
                 pane: &id,
                 statusline: statusline.as_deref(),
             });
-            launch::agent(&cat, agent, spec.task.as_deref(), env, mcp).map_err(fail)?
+            launch::agent(
+                &cat,
+                agent,
+                spec.task.as_deref(),
+                env,
+                mcp,
+                opened.resume.as_deref(),
+            )
+            .map_err(fail)?
         }
     };
     let forward: OnEvent = {
@@ -1111,6 +1138,8 @@ mod tests {
         }
     }
 
+    const SESSION: &str = "3fe10b28-c0b7-47aa-8cb4-dfe4947debd1";
+
     fn exited() -> PaneEvent {
         PaneEvent::Exited { code: Some(0) }
     }
@@ -1126,6 +1155,7 @@ mod tests {
             cwd: "/".into(),
             parent: parent.map(Into::into),
             worktree: None,
+            session: None,
         };
         let layout = Layout {
             version: 1,
@@ -1136,7 +1166,13 @@ mod tests {
                 folder: "/".into(),
                 tree: Tree::Leaf { pane: "p2".into() },
                 focused: "p2".into(),
-                panes: vec![pane("p2", None), pane("p7", Some("p2"))],
+                panes: vec![
+                    pane("p2", None),
+                    SavedPane {
+                        session: Some(SESSION.into()),
+                        ..pane("p7", Some("p2"))
+                    },
+                ],
             }],
         };
         let mut r = Registry::default();
@@ -1153,6 +1189,8 @@ mod tests {
             })
             .unwrap();
         assert_eq!(again.id, "p7");
+        // D-030: the restored conversation is resumed, once.
+        assert_eq!(again.resume.as_deref(), Some(SESSION));
         let token = again.token.expect("agent token");
         assert_eq!(r.resolve(token.expose()).as_deref(), Some("p7"));
         assert!(r.running("p7"));
@@ -1160,6 +1198,56 @@ mod tests {
             r.entry("p7").and_then(|e| e.parent.clone()).as_deref(),
             Some("p2")
         );
+        let rerun = Spec {
+            pane: Some("p7".into()),
+            ..spec(4, Some("claude-code"))
+        };
+        assert_eq!(r.open(&rerun).unwrap().resume, None, "used once");
+    }
+
+    /// A restored session is not resumed into another agent or under a new task, and is dropped either way.
+    #[test]
+    fn resume_only_same_agent_without_task() {
+        use crate::layout::{Layout, SavedPane, SavedWorkspace, Tree};
+        let saved = SavedPane {
+            id: "p3".into(),
+            agent: Some("claude-code".into()),
+            name: "Claude Code".into(),
+            title: "t".into(),
+            cwd: "/".into(),
+            parent: None,
+            worktree: None,
+            session: Some(SESSION.into()),
+        };
+        let layout = Layout {
+            version: 1,
+            active: Some(1),
+            workspaces: vec![SavedWorkspace {
+                id: 1,
+                name: "w".into(),
+                folder: "/".into(),
+                tree: Tree::Leaf { pane: "p3".into() },
+                focused: "p3".into(),
+                panes: vec![saved],
+            }],
+        };
+        for spec in [
+            Spec {
+                pane: Some("p3".into()),
+                ..spec(1, Some("codex"))
+            },
+            Spec {
+                pane: Some("p3".into()),
+                task: Some("new work".into()),
+                ..spec(1, Some("claude-code"))
+            },
+        ] {
+            let mut r = Registry::default();
+            r.restore(&layout);
+            assert_eq!(r.session_of("p3").as_deref(), Some(SESSION));
+            assert_eq!(r.open(&spec).unwrap().resume, None);
+            assert_eq!(r.session_of("p3"), None);
+        }
     }
 
     #[test]

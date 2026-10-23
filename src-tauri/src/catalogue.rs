@@ -23,6 +23,7 @@ const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 const PROBE_MAX_OUTPUT: usize = 64 * 1024;
 const MCP_URL: &str = "{mcp_url}";
 const TASK: &str = "{task}";
+const SESSION: &str = "{session}";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -57,6 +58,10 @@ pub struct Agent {
     #[serde(default)]
     pub mcp_args: Vec<String>,
     pub task_args: Vec<String>,
+    /// Melanjutkan percakapan pane yang dipulihkan (D-030); `{session}` diganti id sesi berbentuk UUID. Kosong = agen
+    /// selalu mulai baru.
+    #[serde(default)]
+    pub resume_args: Vec<String>,
     #[serde(default)]
     pub login_status: Option<LoginStatus>,
     /// Nama variabel kunci API yang dipakai agen ini; nilainya tidak pernah dibaca (AGT-05).
@@ -233,13 +238,38 @@ impl Agent {
         if !self.api_key_env.iter().all(env_name) {
             return Err("api_key_env hanya berisi nama variabel environment".into());
         }
-        for arg in self.mcp_args.iter().chain(&self.task_args) {
+        for arg in self
+            .mcp_args
+            .iter()
+            .chain(&self.task_args)
+            .chain(&self.resume_args)
+        {
             if let Some(why) = bypass_flag(arg) {
                 return Err(format!("flag bypass izin dilarang: `{arg}` ({why})"));
             }
         }
         if self.mcp_args.iter().any(|a| a.contains(TASK)) {
             return Err("`{task}` hanya boleh di task_args".into());
+        }
+        let sessions = self
+            .resume_args
+            .iter()
+            .filter(|a| a.contains(SESSION))
+            .count();
+        if self
+            .mcp_args
+            .iter()
+            .chain(&self.task_args)
+            .any(|a| a.contains(SESSION))
+            || (!self.resume_args.is_empty() && sessions != 1)
+            || self
+                .resume_args
+                .iter()
+                .any(|a| a.contains(TASK) || a.contains(MCP_URL))
+        {
+            return Err(
+                "resume_args memuat `{session}` sekali; `{session}` hanya di resume_args".into(),
+            );
         }
         if self.task_args.iter().any(|a| a.contains(MCP_URL)) {
             return Err("`{mcp_url}` hanya boleh di mcp_args".into());
@@ -256,11 +286,20 @@ impl Agent {
     }
 
     /// Argumen setelah nama program. Tanpa `mcp_url` tidak ada injeksi MCP; tugas kosong tidak menambah `--`.
-    /// Tugas tidak pernah diurai shell atau templat: ia menjadi satu elemen argv apa pun isinya.
-    pub fn build_args(&self, mcp_url: Option<&str>, task: Option<&str>) -> Vec<String> {
+    /// Tugas tidak pernah diurai shell atau templat: ia menjadi satu elemen argv apa pun isinya. `session` (sudah
+    /// divalidasi UUID oleh pemanggil) mengisi `resume_args` sebelum tugas.
+    pub fn build_args(
+        &self,
+        mcp_url: Option<&str>,
+        task: Option<&str>,
+        session: Option<&str>,
+    ) -> Vec<String> {
         let mut args = Vec::new();
         if let Some(url) = mcp_url {
             args.extend(self.mcp_args.iter().map(|a| a.replace(MCP_URL, url)));
+        }
+        if let Some(id) = session {
+            args.extend(self.resume_args.iter().map(|a| a.replace(SESSION, id)));
         }
         if let Some(task) = task.filter(|t| !t.is_empty()) {
             for a in &self.task_args {
@@ -755,6 +794,23 @@ task_args = {task}
         );
     }
 
+    /// D-030: `{session}` only in `resume_args`, once; resume args are checked for bypass flags like the rest.
+    #[test]
+    fn resume_args_template_is_checked() {
+        let base = agent_toml("", r#"["--", "{task}"]"#);
+        let with = |resume: &str| format!("{base}resume_args = {resume}\n");
+        assert!(Catalogue::parse(&with(r#"["--resume", "{session}"]"#)).is_ok());
+        for bad in [
+            r#"["--resume"]"#,
+            r#"["--resume", "{session}", "{session}"]"#,
+            r#"["--resume", "{session}", "{task}"]"#,
+            r#"["--resume", "{session}", "--yolo"]"#,
+        ] {
+            assert!(Catalogue::parse(&with(bad)).is_err(), "{bad}");
+        }
+        assert!(Catalogue::parse(&agent_toml("", r#"["{session}", "--", "{task}"]"#)).is_err());
+    }
+
     #[test]
     fn extracts_text_between_markers_ignoring_noise() {
         let out = "Welcome to zsh!\nAGENTDECK_BEGIN_42 tidak di awal baris\n\
@@ -1021,6 +1077,7 @@ api_key_env = ["GEMINI_API_KEY"]
         let args = codex.build_args(
             Some("http://127.0.0.1:4711/mcp"),
             Some("--yolo; rm -rf ~ {mcp_url}"),
+            None,
         );
         assert!(
             args.contains(&r#"mcp_servers.agentdeck.url="http://127.0.0.1:4711/mcp""#.to_owned())
@@ -1031,14 +1088,21 @@ api_key_env = ["GEMINI_API_KEY"]
         );
 
         let claude = cat.get("claude-code").unwrap();
-        let args = claude.build_args(Some("http://127.0.0.1:4711/mcp"), Some("-p halo"));
+        let args = claude.build_args(Some("http://127.0.0.1:4711/mcp"), Some("-p halo"), None);
+        let id = "3fe10b28-c0b7-47aa-8cb4-dfe4947debd1";
+        let resumed = claude.build_args(None, None, Some(id));
+        assert_eq!(resumed, ["--resume", id]);
+        assert!(
+            codex.build_args(None, None, Some(id)).is_empty(),
+            "codex has no resume_args"
+        );
         assert_eq!(args[0], "--mcp-config");
         assert!(args[1].contains("${AGENTDECK_MCP_URL}") && args[1].contains("${AGENTDECK_TOKEN}"));
         assert_eq!(&args[args.len() - 2..], ["--", "-p halo"]);
 
-        assert!(claude.build_args(None, None).is_empty());
-        assert!(claude.build_args(None, Some("")).is_empty());
-        assert_eq!(claude.build_args(None, Some("x")), ["--", "x"]);
+        assert!(claude.build_args(None, None, None).is_empty());
+        assert!(claude.build_args(None, Some(""), None).is_empty());
+        assert_eq!(claude.build_args(None, Some("x"), None), ["--", "x"]);
     }
 
     #[test]

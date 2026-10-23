@@ -15,6 +15,7 @@ use serde::{Deserialize, Serialize};
 use tauri::State;
 
 use crate::panes::{self, Panes};
+use crate::usage;
 use crate::worktree::{self, Worktree};
 
 pub const FILE: &str = "layout.json";
@@ -62,6 +63,9 @@ pub struct SavedPane {
     /// Filled in from the registry on save; whatever the WebView sends here is replaced.
     #[serde(default)]
     pub worktree: Option<Worktree>,
+    /// Claude session to resume (D-030). Filled in from the registry on save, like `worktree`.
+    #[serde(default)]
+    pub session: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -231,6 +235,9 @@ pub fn load(path: &Path) -> (Layout, Option<String>) {
                 {
                     p.worktree = None;
                 }
+                if p.session.as_deref().is_some_and(|id| !usage::is_uuid(id)) {
+                    p.session = None;
+                }
             }
             (l, None)
         }
@@ -299,6 +306,7 @@ impl Store {
                 .flat_map(|w| w.panes.iter_mut())
             {
                 p.worktree = reg.worktree_of(&p.id);
+                p.session = reg.session_of(&p.id);
             }
         }
         let Some(path) = &self.path else {
@@ -355,6 +363,7 @@ mod tests {
             cwd: "/Users/u/app".into(),
             parent: parent.map(Into::into),
             worktree: None,
+            session: None,
         }
     }
 
@@ -536,6 +545,38 @@ mod tests {
         save(&f, &l).expect("saved");
         let (got, _) = load(&f);
         assert_eq!(got.workspaces[0].panes[1].worktree, None);
+    }
+
+    /// D-030: a session that is not a UUID never comes back from the file (it would become an argv element); one the
+    /// WebView sends is replaced by the registry's on save.
+    #[test]
+    fn sessions_are_uuids_and_come_from_the_registry() {
+        let d = Dir::new("session");
+        let f = d.0.join(FILE);
+        let id = "3fe10b28-c0b7-47aa-8cb4-dfe4947debd1";
+        let mut l = two();
+        l.workspaces[0].panes[0].session = Some(id.into());
+        l.workspaces[0].panes[1].session = Some("--dangerously-skip-permissions".into());
+        save(&f, &l).expect("saved");
+        let (got, _) = load(&f);
+        assert_eq!(got.workspaces[0].panes[0].session.as_deref(), Some(id));
+        assert_eq!(got.workspaces[0].panes[1].session, None);
+
+        let reg = Panes::default();
+        let store = Store::open(Some(&d.0), &reg);
+        let mut planted = two();
+        planted.workspaces[0].panes[1].session = Some(id.into());
+        store.save(planted, &reg).expect("saved");
+        let (again, _) = load(&f);
+        assert_eq!(
+            again.workspaces[0].panes[0].session.as_deref(),
+            Some(id),
+            "restored, not used yet"
+        );
+        assert_eq!(
+            again.workspaces[0].panes[1].session, None,
+            "the WebView cannot plant one"
+        );
     }
 
     #[test]

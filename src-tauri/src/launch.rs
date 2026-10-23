@@ -104,7 +104,8 @@ pub fn shell(env: Vec<(String, OsString)>) -> Launch {
 }
 
 /// Agen dari katalog: path manual bila diisi, selain itu biner dicari di `PATH` env itu sendiri; tugas setelah `--`
-/// sebagai satu argumen. Dengan `mcp`, argv templat katalog (`{mcp_url}`) dan env `AGENTDECK_*` ditambahkan; tanpa itu
+/// sebagai satu argumen. `resume`: id sesi yang dilanjutkan (`resume_args` katalog, D-030). Dengan `mcp`, argv
+/// templat katalog (`{mcp_url}`) dan env `AGENTDECK_*` ditambahkan; tanpa itu
 /// (server MCP mati) atau tanpa templat (agen pengguna) agen jalan polos dan tidak menerima token.
 pub fn agent(
     cat: &Catalogue,
@@ -112,6 +113,7 @@ pub fn agent(
     task: Option<&str>,
     mut env: Vec<(String, OsString)>,
     mcp: Option<Mcp>,
+    resume: Option<&str>,
 ) -> Result<Launch, LaunchError> {
     let agent = cat
         .get(id)
@@ -131,7 +133,7 @@ pub fn agent(
         .ok_or_else(|| LaunchError::new("Path agen bukan UTF-8."))?;
     let mcp = mcp.filter(|_| !agent.mcp_args.is_empty());
     let mut argv = vec![program.to_owned()];
-    argv.extend(agent.build_args(mcp.as_ref().map(|m| m.url), task));
+    argv.extend(agent.build_args(mcp.as_ref().map(|m| m.url), task, resume));
     if let Some(m) = mcp {
         env.push(("AGENTDECK_MCP_URL".into(), m.url.into()));
         env.push(("AGENTDECK_TOKEN".into(), m.token.expose().into()));
@@ -231,7 +233,7 @@ mod tests {
         let cat = Catalogue::embedded().unwrap();
         for (id, bin) in [("claude-code", "claude"), ("codex", "codex")] {
             let task = "--dangerously-skip-permissions; rm -rf ~ $(x)";
-            let l = agent(&cat, id, Some(task), env(polluted, &path), None).unwrap();
+            let l = agent(&cat, id, Some(task), env(polluted, &path), None, None).unwrap();
             // No shell, no MCP without a server, the task one untouched element after `--`.
             assert_eq!(
                 l.argv,
@@ -239,9 +241,9 @@ mod tests {
                 "{id}"
             );
             assert!(l.osc_status);
-            let bare = agent(&cat, id, None, env(polluted, &path), None).unwrap();
+            let bare = agent(&cat, id, None, env(polluted, &path), None, None).unwrap();
             assert_eq!(bare.argv.len(), 1);
-            let empty = agent(&cat, id, Some(""), env(polluted, &path), None).unwrap();
+            let empty = agent(&cat, id, Some(""), env(polluted, &path), None, None).unwrap();
             assert_eq!(empty.argv, bare.argv);
         }
     }
@@ -264,7 +266,15 @@ mod tests {
             })
         };
         let big = format!("-{}", "x".repeat(16 * 1024 - 1));
-        let claude = agent(&cat, "claude-code", Some(&big), env(polluted, &path), mcp()).unwrap();
+        let claude = agent(
+            &cat,
+            "claude-code",
+            Some(&big),
+            env(polluted, &path),
+            mcp(),
+            None,
+        )
+        .unwrap();
         assert_eq!(
             claude.argv[1..],
             [
@@ -278,7 +288,15 @@ mod tests {
                 big.as_str(),
             ]
         );
-        let codex = agent(&cat, "codex", Some("-a never"), env(polluted, &path), mcp()).unwrap();
+        let codex = agent(
+            &cat,
+            "codex",
+            Some("-a never"),
+            env(polluted, &path),
+            mcp(),
+            None,
+        )
+        .unwrap();
         assert_eq!(
             codex.argv[1..],
             [
@@ -313,10 +331,18 @@ mod tests {
     #[test]
     fn missing_binary_reports_install_command() {
         let cat = Catalogue::embedded().unwrap();
-        let err = agent(&cat, "codex", None, env(polluted, "/nonexistent"), None).unwrap_err();
+        let err = agent(
+            &cat,
+            "codex",
+            None,
+            env(polluted, "/nonexistent"),
+            None,
+            None,
+        )
+        .unwrap_err();
         assert_eq!(err.message, "codex tidak ditemukan di PATH.");
         assert_eq!(err.install.as_deref(), Some("npm install -g @openai/codex"));
-        assert!(agent(&cat, "nope", None, vec![], None).is_err());
+        assert!(agent(&cat, "nope", None, vec![], None, None).is_err());
     }
 
     #[test]
@@ -326,12 +352,20 @@ mod tests {
         let manual = dir.join("my-claude");
         cat.agents[0].path_override = Some(manual.clone());
         let path = dir.display().to_string();
-        let l = agent(&cat, "claude-code", Some("hi"), env(polluted, &path), None).unwrap();
+        let l = agent(
+            &cat,
+            "claude-code",
+            Some("hi"),
+            env(polluted, &path),
+            None,
+            None,
+        )
+        .unwrap();
         assert_eq!(l.argv, [manual.to_str().unwrap(), "--", "hi"]);
 
         // A stale manual path is an error to fix in Settings, never a silent fall back to `claude` on PATH.
         cat.agents[0].path_override = Some(dir.join("gone"));
-        let err = agent(&cat, "claude-code", None, env(polluted, &path), None).unwrap_err();
+        let err = agent(&cat, "claude-code", None, env(polluted, &path), None, None).unwrap_err();
         assert!(err.message.contains("Path manual"), "{}", err.message);
         assert_eq!(err.install, None);
     }
@@ -356,7 +390,15 @@ mod tests {
             statusline: Some(Path::new("/data/statusline/p1.json")),
         };
         let path = dir.display().to_string();
-        let l = agent(&cat, "gemini", Some("x"), env(polluted, &path), Some(mcp)).unwrap();
+        let l = agent(
+            &cat,
+            "gemini",
+            Some("x"),
+            env(polluted, &path),
+            Some(mcp),
+            None,
+        )
+        .unwrap();
         assert_eq!(l.argv[1..], ["--", "x"]);
         assert!(!l.env.iter().any(|(k, _)| k.starts_with("AGENTDECK_")));
         assert!(!l.osc_status);
