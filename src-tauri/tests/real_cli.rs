@@ -110,6 +110,8 @@ fn claude_and_codex_round_trip() {
         task: task.map(str::to_owned),
         rows: ROWS,
         cols: COLS,
+        worktree: false,
+        bypass: false,
     };
     let p1 = panes::start(
         &panes,

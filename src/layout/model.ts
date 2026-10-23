@@ -59,6 +59,10 @@ export type Pane = {
   report?: Report;
   /** Claude panes only, polled while the workspace is shown. */
   usage?: Usage;
+  /** Opened with permissions bypassed (D-034): red badge; only its own children may send to it. */
+  bypass?: boolean;
+  /** Branch of the pane's own worktree ("worktree per terminal", D-034). */
+  branch?: string;
   pending: number;
   /** Why those messages are not pasted yet ("kamu sedang mengetik"); absent when the core gave no reason. */
   pendingWhy?: string;

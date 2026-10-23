@@ -116,6 +116,19 @@ export function PaneView({
           <span className="pane-folder-tail">{tail}</span>
         </span>
         <span className="pane-spacer" />
+        {pane.bypass ? (
+          <span
+            className="badge pane-bypass"
+            title="Izin agen dilewati: perintah dijalankan tanpa bertanya. Pesan dari agen lain ditolak, kecuali dari anaknya sendiri."
+          >
+            bypass izin
+          </span>
+        ) : null}
+        {pane.branch ? (
+          <span className="badge mono pane-branch" title={`Worktree sendiri, branch ${pane.branch}`}>
+            {pane.branch}
+          </span>
+        ) : null}
         {pane.parent ? <span className="badge pane-relation">anak {pane.parent}</span> : null}
         {pane.report ? <ReportBadge report={pane.report} /> : null}
         {pane.usage ? <UsageBadge usage={pane.usage} /> : null}

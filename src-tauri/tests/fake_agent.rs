@@ -468,6 +468,8 @@ fn spec(workspace: u32, agent: &str, task: Option<&str>) -> Spec {
         task: task.map(str::to_owned),
         rows: ROWS,
         cols: COLS,
+        worktree: false,
+        bypass: false,
     }
 }
 

@@ -32,6 +32,8 @@ pub struct Pane {
     /// Set when the pane was opened by an agent (`pane_spawn`); `None` when the person opened it.
     pub parent: Option<String>,
     pub exited: bool,
+    /// Opened by the person with permissions bypassed (D-034): only its own children may send to it.
+    pub bypass: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -67,6 +69,8 @@ pub enum PolicyError {
     PeerSendOff,
     TargetShell,
     TargetExited,
+    /// The target runs with permissions bypassed and takes messages only from its own children (D-034).
+    TargetBypass,
     NoParent,
     SelfTarget,
     SpawnOff,
@@ -91,6 +95,7 @@ impl PolicyError {
             Self::PeerSendOff => "PEER_SEND_OFF",
             Self::TargetShell => "TARGET_SHELL",
             Self::TargetExited => "TARGET_EXITED",
+            Self::TargetBypass => "TARGET_BYPASS",
             Self::NoParent => "NO_PARENT",
             Self::SelfTarget => "SELF",
             Self::SpawnOff => "SPAWN_OFF",
@@ -115,6 +120,10 @@ impl fmt::Display for PolicyError {
             Self::TargetShell => f.write_str("the target is a shell pane. Not supported."),
             Self::TargetExited => f.write_str(
                 "the target agent has exited. Read its screen if allowed, and tell the person.",
+            ),
+            Self::TargetBypass => f.write_str(
+                "the target runs with permissions bypassed and accepts messages only from its own children. Tell \
+                 the person; do not look for another way.",
             ),
             Self::NoParent => f.write_str(
                 "this pane has no parent (the person opened it). Print your result in your own pane.",
@@ -202,6 +211,11 @@ pub fn can_send(from: &Pane, to: &Pane, peer_messaging: bool) -> Result<(), Poli
         Relation::Peer if !peer_messaging => return Err(PolicyError::PeerSendOff),
         Relation::Parent | Relation::Child | Relation::Peer => {}
     }
+    // A bypassed pane runs whatever it is told without asking anyone, so another agent's text must not reach it; its
+    // own children (approved by the person, never bypassed) may still report back (D-034).
+    if to.bypass && relation(from, to) != Relation::Parent {
+        return Err(PolicyError::TargetBypass);
+    }
     if to.exited {
         return Err(PolicyError::TargetExited);
     }
@@ -210,8 +224,10 @@ pub fn can_send(from: &Pane, to: &Pane, peer_messaging: bool) -> Result<(), Poli
 
 /// `pane_read` rule (§5.4): same relations as send, every refusal is `NOT_ALLOWED`; exited panes stay readable.
 pub fn can_read(from: &Pane, to: &Pane, peer_messaging: bool) -> Result<(), PolicyError> {
+    // Reading never makes the target act, so bypass does not limit it.
     let live = Pane {
         exited: false,
+        bypass: false,
         ..to.clone()
     };
     can_send(from, &live, peer_messaging).map_err(|e| match e {
@@ -443,6 +459,7 @@ mod tests {
             kind: PaneKind::Agent,
             parent: parent.map(Into::into),
             exited: false,
+            bypass: false,
         }
     }
 
@@ -534,6 +551,33 @@ mod tests {
         assert_eq!(
             can_read(&a, &a, true).map_err(|e| e.code()),
             Err("NOT_ALLOWED")
+        );
+    }
+
+    /// D-034: peers (even with peer messaging on) and the pane's own parent are refused; its children still report;
+    /// reading is unaffected.
+    #[test]
+    fn bypassed_target_takes_only_its_childrens_messages() {
+        let b = Pane {
+            bypass: true,
+            ..agent("p1", "w", None)
+        };
+        let peer = agent("p2", "w", None);
+        let child = agent("p3", "w", Some("p1"));
+        assert_eq!(can_send(&peer, &b, true), Err(PolicyError::TargetBypass));
+        assert_eq!(can_send(&peer, &b, false), Err(PolicyError::PeerSendOff));
+        assert_eq!(can_send(&child, &b, false), Ok(()));
+        assert_eq!(can_read(&peer, &b, true), Ok(()));
+        assert_eq!(PolicyError::TargetBypass.code(), "TARGET_BYPASS");
+        // A bypassed pane opened by an agent cannot exist, but if it did its parent would be refused too.
+        let bypassed_child = Pane {
+            bypass: true,
+            ..child.clone()
+        };
+        let parent = agent("p1", "w", None);
+        assert_eq!(
+            can_send(&parent, &bypassed_child, false),
+            Err(PolicyError::TargetBypass)
         );
     }
 

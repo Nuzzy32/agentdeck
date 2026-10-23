@@ -136,7 +136,8 @@ fn zsh_integration(tmp: &Path) -> Option<std::path::PathBuf> {
 
 /// Agen dari katalog: path manual bila diisi, selain itu biner dicari di `PATH` env itu sendiri; tugas setelah `--`
 /// sebagai satu argumen. `resume`: id sesi yang dilanjutkan (`resume_args` katalog, D-030). Dengan `mcp`, argv
-/// templat katalog (`{mcp_url}`) dan env `AGENTDECK_*` ditambahkan; tanpa itu
+/// templat katalog (`{mcp_url}`) dan env `AGENTDECK_*` ditambahkan; `bypass` (hanya dari sakelar orang di peluncur,
+/// D-034) menambah [`catalogue::Agent::bypass_arg`]; tanpa itu
 /// (server MCP mati) atau tanpa templat (agen pengguna) agen jalan polos dan tidak menerima token.
 pub fn agent(
     cat: &Catalogue,
@@ -145,6 +146,7 @@ pub fn agent(
     mut env: Vec<(String, OsString)>,
     mcp: Option<Mcp>,
     resume: Option<&str>,
+    bypass: bool,
 ) -> Result<Launch, LaunchError> {
     let agent = cat
         .get(id)
@@ -164,6 +166,13 @@ pub fn agent(
         .ok_or_else(|| LaunchError::new("Path agen bukan UTF-8."))?;
     let mcp = mcp.filter(|_| !agent.mcp_args.is_empty());
     let mut argv = vec![program.to_owned()];
+    // Own element right after the program (D-034), so the task stays last after `--`.
+    if bypass {
+        let flag = agent
+            .bypass_arg()
+            .ok_or_else(|| LaunchError::new("Bypass izin tidak tersedia untuk agen ini."))?;
+        argv.push(flag.to_owned());
+    }
     argv.extend(agent.build_args(mcp.as_ref().map(|m| m.url), task, resume));
     if let Some(m) = mcp {
         env.push(("AGENTDECK_MCP_URL".into(), m.url.into()));
@@ -264,7 +273,16 @@ mod tests {
         let cat = Catalogue::embedded().unwrap();
         for (id, bin) in [("claude-code", "claude"), ("codex", "codex")] {
             let task = "--dangerously-skip-permissions; rm -rf ~ $(x)";
-            let l = agent(&cat, id, Some(task), env(polluted, &path), None, None).unwrap();
+            let l = agent(
+                &cat,
+                id,
+                Some(task),
+                env(polluted, &path),
+                None,
+                None,
+                false,
+            )
+            .unwrap();
             // No shell, no MCP without a server, the task one untouched element after `--`.
             assert_eq!(
                 l.argv,
@@ -272,9 +290,9 @@ mod tests {
                 "{id}"
             );
             assert!(l.osc_status);
-            let bare = agent(&cat, id, None, env(polluted, &path), None, None).unwrap();
+            let bare = agent(&cat, id, None, env(polluted, &path), None, None, false).unwrap();
             assert_eq!(bare.argv.len(), 1);
-            let empty = agent(&cat, id, Some(""), env(polluted, &path), None, None).unwrap();
+            let empty = agent(&cat, id, Some(""), env(polluted, &path), None, None, false).unwrap();
             assert_eq!(empty.argv, bare.argv);
         }
     }
@@ -304,6 +322,7 @@ mod tests {
             env(polluted, &path),
             mcp(),
             None,
+            false,
         )
         .unwrap();
         assert_eq!(
@@ -326,6 +345,7 @@ mod tests {
             env(polluted, &path),
             mcp(),
             None,
+            false,
         )
         .unwrap();
         assert_eq!(
@@ -359,6 +379,58 @@ mod tests {
         }
     }
 
+    /// D-034: the bypass flag is its own element right after the program, before the MCP args, the resume args and
+    /// `--`; off adds nothing; a user agent cannot get one.
+    #[test]
+    fn bypass_flag_right_after_program_only_when_asked() {
+        let dir = bin_dir(&["claude", "codex"]);
+        let path = dir.display().to_string();
+        let mut cat = Catalogue::embedded().unwrap();
+        let id = "3fe10b28-c0b7-47aa-8cb4-dfe4947debd1";
+        let l = agent(
+            &cat,
+            "claude-code",
+            Some("-x"),
+            env(polluted, &path),
+            None,
+            Some(id),
+            true,
+        )
+        .unwrap();
+        assert_eq!(
+            l.argv[1..],
+            ["--dangerously-skip-permissions", "--resume", id, "--", "-x"]
+        );
+        let codex = agent(&cat, "codex", None, env(polluted, &path), None, None, true).unwrap();
+        assert_eq!(
+            codex.argv[1..],
+            ["--dangerously-bypass-approvals-and-sandbox"]
+        );
+        let off = agent(
+            &cat,
+            "claude-code",
+            None,
+            env(polluted, &path),
+            None,
+            None,
+            false,
+        )
+        .unwrap();
+        assert!(!off.argv.iter().any(|a| a.contains("dangerously")));
+        cat.agents[0].from_user = true;
+        let err = agent(
+            &cat,
+            "claude-code",
+            None,
+            env(polluted, &path),
+            None,
+            None,
+            true,
+        )
+        .unwrap_err();
+        assert!(err.message.contains("Bypass"), "{}", err.message);
+    }
+
     #[test]
     fn missing_binary_reports_install_command() {
         let cat = Catalogue::embedded().unwrap();
@@ -369,11 +441,12 @@ mod tests {
             env(polluted, "/nonexistent"),
             None,
             None,
+            false,
         )
         .unwrap_err();
         assert_eq!(err.message, "codex tidak ditemukan di PATH.");
         assert_eq!(err.install.as_deref(), Some("npm install -g @openai/codex"));
-        assert!(agent(&cat, "nope", None, vec![], None, None).is_err());
+        assert!(agent(&cat, "nope", None, vec![], None, None, false).is_err());
     }
 
     #[test]
@@ -390,13 +463,23 @@ mod tests {
             env(polluted, &path),
             None,
             None,
+            false,
         )
         .unwrap();
         assert_eq!(l.argv, [manual.to_str().unwrap(), "--", "hi"]);
 
         // A stale manual path is an error to fix in Settings, never a silent fall back to `claude` on PATH.
         cat.agents[0].path_override = Some(dir.join("gone"));
-        let err = agent(&cat, "claude-code", None, env(polluted, &path), None, None).unwrap_err();
+        let err = agent(
+            &cat,
+            "claude-code",
+            None,
+            env(polluted, &path),
+            None,
+            None,
+            false,
+        )
+        .unwrap_err();
         assert!(err.message.contains("Path manual"), "{}", err.message);
         assert_eq!(err.install, None);
     }
@@ -428,6 +511,7 @@ mod tests {
             env(polluted, &path),
             Some(mcp),
             None,
+            false,
         )
         .unwrap();
         assert_eq!(l.argv[1..], ["--", "x"]);

@@ -4,7 +4,7 @@ import { shortcut } from "../layout/keys";
 import { leaves } from "../layout/tree";
 import { DEFAULTS, merge, type Prompt } from "../settings/settings";
 import { Palette } from "./Palette";
-import { NAME_MAX, PRESETS, presetTree, PROMPTS_MAX, savePrompt, search, TEXT_MAX } from "./prompts";
+import { expand, gridTree, NAME_MAX, PRESETS, PROMPTS_MAX, savePrompt, search, TEXT_MAX } from "./prompts";
 
 const review: Prompt = { name: "Review", text: "Tinjau diff ini.\nSingkat saja." };
 const tests: Prompt = { name: "Tes", text: "Jalankan pnpm test" };
@@ -68,7 +68,7 @@ describe("saving a prompt", () => {
 describe("session presets", () => {
   it("are catalogue ids and a split, nothing an agent could be launched with", () => {
     for (const p of PRESETS) {
-      expect(Object.keys(p).sort()).toEqual(["agents", "detail", "dir", "id", "name"]);
+      expect(Object.keys(p).sort()).toEqual(["agents", "detail", "id", "name"]);
       for (const a of p.agents) expect(a).toMatch(/^[a-z][a-z0-9-]*$/);
     }
     expect(PRESETS.map((p) => [p.name, p.agents])).toEqual([
@@ -77,12 +77,26 @@ describe("session presets", () => {
     ]);
   });
 
-  it("place panes in order: Pair is Claude left, Codex right", () => {
-    expect(presetTree(["p1"], "row")).toEqual({ pane: "p1" });
-    const pair = presetTree(["p1", "p2"], "row");
-    expect(pair).toEqual({ dir: "row", ratio: 0.5, a: { pane: "p1" }, b: { pane: "p2" } });
-    expect(leaves(presetTree(["p1", "p2", "p3"], "col"))).toEqual(["p1", "p2", "p3"]);
-    expect(() => presetTree([], "row")).toThrow();
+  it("place panes in order with even shares: Pair is Claude left, Codex right", () => {
+    expect(gridTree(["p1"])).toEqual({ pane: "p1" });
+    expect(gridTree(["p1", "p2"])).toEqual({ dir: "row", ratio: 0.5, a: { pane: "p1" }, b: { pane: "p2" } });
+    const three = gridTree(["p1", "p2", "p3"]);
+    expect(leaves(three)).toEqual(["p1", "p2", "p3"]);
+    expect(three).toMatchObject({ dir: "row", ratio: 1 / 3, b: { dir: "row", ratio: 0.5 } });
+    // Four or more: two rows, the top one gets the odd pane.
+    const five = gridTree(["p1", "p2", "p3", "p4", "p5"]);
+    expect(five).toMatchObject({ dir: "col", ratio: 0.5 });
+    expect(leaves(five)).toEqual(["p1", "p2", "p3", "p4", "p5"]);
+    if (!("a" in five)) throw new Error("split expected");
+    expect(leaves(five.a)).toEqual(["p1", "p2", "p3"]);
+    expect(() => gridTree([])).toThrow();
+  });
+
+  it("expand counts in program order (D-034)", () => {
+    const order = ["shell", "claude-code", "codex"];
+    expect(expand({ codex: 2, "claude-code": 1 }, order)).toEqual(["claude-code", "codex", "codex"]);
+    expect(expand({ shell: 1, "claude-code": 0, gemini: 3 }, order)).toEqual(["shell"]);
+    expect(expand({ codex: -1, shell: 1.7 }, order)).toEqual(["shell"]);
   });
 });
 

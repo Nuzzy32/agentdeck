@@ -12,7 +12,8 @@ vitest 114): D-031 blok perintah OSC 133 di pane zsh (penanda gutter dan ⌘↑/
 hanya lewat harness browser), D-032 pustaka prompt ⌘P + preset Solo/Pair (diuji di aplikasi), D-033 `QUOTA_LOW` di
 `pane_spawn` + tool `pane_claim` (belum dengan agen asli; ambang belum di Settings, belum ada toast UI). Uji visual
 butuh izin Screen Recording untuk binary Claude Code 2.1.308 (dicabut macOS 2026-10-23 sore). Kandidat berikutnya:
-papan task, ambang kuota di Settings + toast `QUOTA_LOW`.
+papan task, ambang kuota di Settings + toast `QUOTA_LOW`. D-034 (peluncur multi-terminal, worktree per terminal,
+bypass untuk pane yang dibuka orang) dibuat dan diuji headless dengan CLI asli; **peluncurnya belum diklik di aplikasi**.
 
 **T3.2 sudah di-merge ke main dan di-push (2026-10-23)** (`pane_spawn` + audit + worktree + uji alur B, D-024). MVP
 (alur B) berjalan; yang belum hanya bagian Codex (lihat di bawah).
@@ -46,7 +47,7 @@ Lanjutkan mengirim pesan tertahan dan penghitung mulai lagi; Hentikan dan buang 
 `dropped` "stopped by the person at the loop guard", audit `loop_paused`. `pane_read` dipanggil Claude asli dan
 membaca layar pane lain dengan benar.
 
-**Keputusan tertunda pemilik:** D-019 (teruskan kunci API lewat daftar izin?), D-034 (flag bypass untuk pane yang dibuka orang: a/b/c). Diputuskan 2026-10-23: distribusi
+**Keputusan tertunda pemilik:** D-019 (teruskan kunci API lewat daftar izin?). D-034 diputuskan (c) 2026-10-23. Diputuskan 2026-10-23: distribusi
 pribadi, rilis publik ditunda, nama tetap agentdeck (D-026).
 
 **Catatan lingkungan pemilik:**

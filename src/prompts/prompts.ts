@@ -1,5 +1,5 @@
 // Prompt library and session presets (D-032). Pure parts, so they run under Vitest; Palette.tsx is the view.
-import { type Dir, split, type Tree } from "../layout/tree";
+import type { Tree } from "../layout/tree";
 import type { Prompt } from "../settings/settings";
 
 /** The core's limits (settings.rs); mirrored only to refuse in place, the core has the last word. */
@@ -11,24 +11,36 @@ export const TEXT_MAX = 10_000;
  * A session preset: catalogue agent ids in pane order and the split direction. Deliberately no args, flags, or env:
  * every launch goes through `pane_create`, which takes those from the catalogue alone.
  */
-export type Preset = { id: string; name: string; detail: string; agents: readonly string[]; dir: Dir };
+export type Preset = { id: string; name: string; detail: string; agents: readonly string[] };
 
 export const PRESETS: readonly Preset[] = [
-  { id: "solo", name: "Solo", detail: "Claude Code", agents: ["claude-code"], dir: "row" },
-  { id: "pair", name: "Pair", detail: "Claude Code kiri, Codex kanan", agents: ["claude-code", "codex"], dir: "row" },
+  { id: "solo", name: "Solo", detail: "Claude Code", agents: ["claude-code"] },
+  { id: "pair", name: "Pair", detail: "Claude Code kiri, Codex kanan", agents: ["claude-code", "codex"] },
 ];
 
-// ponytail: each pane splits the last one, so three or more get 1/2, 1/4, 1/4; even shares when such a preset exists.
-export function presetTree(ids: readonly string[], dir: Dir): Tree {
+/** Most panes the launcher opens at once (D-034). */
+export const MANY_MAX = 8;
+
+/** Panes per program id (catalogue id, or the launcher's shell id). */
+export type Counts = Record<string, number>;
+
+/** Pane order for `counts`: in `order` (the launcher's program list), each program's panes together. */
+export function expand(counts: Counts, order: readonly string[]): string[] {
+  return order.flatMap((id) => Array.from({ length: Math.max(0, Math.floor(counts[id] ?? 0)) }, () => id));
+}
+
+/** Side by side with even shares: each split gives its first child 1/k of what is left. */
+function row(ids: readonly string[]): Tree {
   const [first, ...rest] = ids;
-  if (first === undefined) throw new Error("preset without panes");
-  let tree: Tree = { pane: first };
-  let last = first;
-  for (const id of rest) {
-    tree = split(tree, last, dir, id);
-    last = id;
-  }
-  return tree;
+  if (first === undefined) throw new Error("no panes");
+  return rest.length === 0 ? { pane: first } : { dir: "row", ratio: 1 / ids.length, a: { pane: first }, b: row(rest) };
+}
+
+/** Even grid in leaf order: up to 3 panes in one row, more in two rows (the top one gets the odd pane). */
+export function gridTree(ids: readonly string[]): Tree {
+  if (ids.length <= 3) return row(ids);
+  const top = Math.ceil(ids.length / 2);
+  return { dir: "col", ratio: 0.5, a: row(ids.slice(0, top)), b: row(ids.slice(top)) };
 }
 
 export type Item = { kind: "prompt"; prompt: Prompt; index: number } | { kind: "preset"; preset: Preset };

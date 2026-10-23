@@ -65,14 +65,15 @@ Daftar pane di workspace pemanggil.
 {
   "you": "p1",
   "panes": [
-    {"id": "p1", "title": "feat: auth", "agent": "claude-code", "status": "idle",    "relation": "you",   "can_send": false, "can_read": false, "claims": []},
-    {"id": "p2", "title": "review: auth", "agent": "codex",     "status": "working", "relation": "child", "can_send": true,  "can_read": true,  "claims": ["/abs/repo/src/auth"]},
-    {"id": "p3", "title": "zsh",           "agent": null,        "status": "unknown", "relation": "shell", "can_send": false, "can_read": false, "claims": []}
+    {"id": "p1", "title": "feat: auth", "agent": "claude-code", "status": "idle",    "relation": "you",   "can_send": false, "can_read": false, "claims": [], "bypass": false},
+    {"id": "p2", "title": "review: auth", "agent": "codex",     "status": "working", "relation": "child", "can_send": true,  "can_read": true,  "claims": ["/abs/repo/src/auth"], "bypass": false},
+    {"id": "p3", "title": "zsh",           "agent": null,        "status": "unknown", "relation": "shell", "can_send": false, "can_read": false, "claims": [], "bypass": false}
   ],
   "peer_messaging": false
 }
 ```
-`relation`: `you`, `parent`, `child`, `peer`, `shell`. `status`: lihat ARCHITECTURE §6. `claims`: path absolut dari
+`relation`: `you`, `parent`, `child`, `peer`, `shell`. `status`: lihat ARCHITECTURE §6. `bypass`: pane dibuka orang
+dengan izin dilewati (D-034), `can_send` ke sana `false` kecuali bagi anaknya. `claims`: path absolut dari
 `pane_claim` pane itu (D-033).
 
 ---
@@ -141,6 +142,7 @@ menahan antrean; pesan tetap tersimpan sampai orang memutuskan.
 | `PEER_SEND_OFF` | Tujuan peer, sakelar workspace mati. | Beri tahu orang; jangan cari jalan lain. |
 | `TARGET_SHELL` | Tujuan pane shell. | Tidak didukung. |
 | `TARGET_EXITED` | Agen tujuan sudah keluar. | Baca layarnya bila boleh, beri tahu orang. |
+| `TARGET_BYPASS` | Tujuan dibuka orang dengan izin dilewati (D-034); hanya anaknya sendiri yang boleh mengirim ke sana (`pane_send "parent"`, `pane_report`). | Beri tahu orang; jangan cari jalan lain. |
 | `NO_PARENT` | `"parent"` dipakai oleh pane yang dibuka orang. | Cetak hasil di pane sendiri. |
 | `SELF` | Mengirim ke diri sendiri. | Tidak perlu. |
 | `TOO_LARGE` | Lebih dari 8 KB. | Ringkas; tunjuk berkas atau commit, jangan tempel log panjang. |

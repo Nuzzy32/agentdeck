@@ -379,6 +379,20 @@ export function PeerDialog({
   );
 }
 
+/** Before the launcher's "bypass izin" goes on (D-034). Batal is focused, so Enter alone never turns it on. */
+export function BypassDialog({ onConfirm, onCancel }: { onConfirm: () => void; onCancel: () => void }) {
+  return (
+    <ConfirmDialog
+      title="Lewati izin di semua terminal agen baru?"
+      text="Claude Code dan Codex akan menjalankan perintah dan mengubah berkas tanpa bertanya, dan sandbox Codex ikut mati. Pane ini menolak pesan dari agen lain, kecuali dari anaknya sendiri. Hanya untuk folder yang kamu percaya."
+      confirm="Lewati izin"
+      danger
+      onConfirm={onConfirm}
+      onCancel={onCancel}
+    />
+  );
+}
+
 /**
  * Native modal dialog: Esc cancels, focus stays inside, and Batal is focused by default so a stray Enter does not
  * confirm.

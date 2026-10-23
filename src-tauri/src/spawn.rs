@@ -402,26 +402,7 @@ fn early_lock(e: &Early) -> std::sync::MutexGuard<'_, (Option<String>, Vec<PaneE
 impl Launch {
     fn run(self) -> Result<Spawned, String> {
         let failed = |e: &str| format!("SPAWN_FAILED: {e}. Tell the person.");
-        let mut cwd = self.cwd.clone();
-        let wt = match &self.repo {
-            None => None,
-            Some(root) => {
-                let name = panes::lock(&self.engine.panes).next_id();
-                let wt = worktree::create(root, &name)
-                    .map_err(|e| failed(&format!("the worktree could not be created ({e})")))?;
-                cwd = wt
-                    .path
-                    .join(self.cwd.strip_prefix(root).unwrap_or(Path::new("")));
-                Some(wt)
-            }
-        };
-        let drop_wt = |wt: &Option<worktree::Worktree>| {
-            if let Some(wt) = wt {
-                worktree::cleanup(wt);
-            }
-        };
-        let Some(cwd_str) = cwd.to_str().map(str::to_owned) else {
-            drop_wt(&wt);
+        let Some(cwd_str) = self.cwd.to_str().map(str::to_owned) else {
             return Err(failed("the folder path is not UTF-8"));
         };
         let spec = Spec {
@@ -430,10 +411,13 @@ impl Launch {
             pane: None,
             agent: Some(self.agent.clone()),
             title: self.title.clone(),
-            cwd: cwd_str.clone(),
+            cwd: cwd_str,
             task: Some(self.task.clone()),
             rows: ROWS,
             cols: COLS,
+            // Never from an agent (D-034); the worktree, when asked for, comes from `start_in_worktree` below.
+            worktree: false,
+            bypass: false,
         };
         let early: Early = Arc::default();
         let on_event = {
@@ -450,27 +434,17 @@ impl Launch {
                 }
             })
         };
-        let started = panes::start(
+        let (panes, pm, url) = (
             &self.engine.panes,
             &self.engine.pm,
-            Some(&self.spawner.url),
-            self.env,
-            &spec,
-            on_event,
+            Some(self.spawner.url.as_str()),
         );
-        let started = match started {
-            Ok(s) => s,
-            Err(e) => {
-                drop_wt(&wt);
-                return Err(failed(&e.message));
-            }
-        };
-        let branch = wt.as_ref().map(|w| w.branch.clone());
-        if let Some(wt) = wt
-            && let Err(wt) = panes::lock(&self.engine.panes).set_worktree(&started.pane, wt)
-        {
-            worktree::cleanup(&wt); // closed already
+        let started = match &self.repo {
+            None => panes::start(panes, pm, url, self.env, &spec, on_event),
+            Some(root) => panes::start_in_worktree(panes, pm, url, self.env, &spec, root, on_event),
         }
+        .map_err(|e| failed(&e.message))?;
+        let (cwd_str, branch) = (started.cwd.clone(), started.branch.clone());
         let child = Spawned {
             pane: started.pane.clone(),
             pty: started.pty,
@@ -562,6 +536,8 @@ mod tests {
                 task: None,
                 rows: 24,
                 cols: 80,
+                worktree: false,
+                bypass: false,
             };
             let t = r
                 .open(&spec(Some("claude-code"), None))
@@ -919,6 +895,8 @@ mod tests {
                 task: None,
                 rows: 24,
                 cols: 80,
+                worktree: false,
+                bypass: false,
             };
             panes::lock(&f.engine.panes).open(&spec).unwrap();
         }

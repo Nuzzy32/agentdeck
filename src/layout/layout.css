@@ -398,6 +398,10 @@
   border-color: var(--warn);
   color: var(--warn);
 }
+.pane-bypass {
+  border-color: var(--danger);
+  color: var(--danger);
+}
 .pane-usage-warn {
   border-color: var(--warn);
   color: var(--warn);
@@ -412,6 +416,7 @@
 @container pane-header (max-width: 420px) {
   .pane-status-label,
   .pane-relation,
+  .pane-branch,
   .pane-report,
   .pane-usage {
     display: none;
@@ -720,6 +725,38 @@ textarea.input {
 .launcher-program-label input {
   margin: 0;
   accent-color: var(--accent);
+}
+.launcher-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+.launcher-count-n {
+  min-width: 2ch;
+  text-align: center;
+}
+.launcher-toggles {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 12px;
+}
+.launcher-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+.launcher-toggle input {
+  margin: 0;
+  accent-color: var(--accent);
+}
+.launcher-toggle-danger:has(input:checked) {
+  color: var(--danger);
+}
+.launcher-toggle-danger input {
+  accent-color: var(--danger);
 }
 .launcher-program-name {
   font-weight: 600;

@@ -79,6 +79,11 @@ pub enum Audit<'a> {
     PaneClosed {
         pane: &'a str,
     },
+    /// The person opened an agent pane with permissions bypassed (D-034).
+    PaneBypass {
+        pane: &'a str,
+        agent: &'a str,
+    },
 }
 
 #[derive(Serialize)]

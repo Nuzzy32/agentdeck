@@ -100,6 +100,13 @@ Popover di tengah pane tujuan, dibuka `⌘T`, `⌘D`, `⌘⇧D`, atau `+`.
 - Folder: bawaan folder pane aktif; daftar 5 folder terakhir; tombol pilih folder (dialog native).
 - Tugas awal (opsional, hanya agen): textarea mono 4 baris.
 - `Enter` meluncurkan (di textarea: `⌘Enter`), `Esc` menutup. Panah atas/bawah memilih agen.
+- **Workspace baru (D-034)**: pilihan program diganti stepper jumlah per program ("Terminal sekaligus", total 1–8) dan
+  pintasan `1 Claude`, `Claude + Codex`, `2 + 2`, `3 + 3` (hanya yang agennya terpasang). Pane disusun rata: ≤ 3 dalam
+  satu baris, lebih dari itu dua baris. Tugas awal hanya bila tepat satu pane agen.
+- Sakelar (mati setiap kali peluncur dibuka): **Worktree baru per terminal agen** (folder harus repo git; tiap pane agen
+  di `.worktrees/pN`, branch `agent/pN`, dihapus saat ditutup bila tidak berubah) dan **Lewati izin di semua terminal
+  agen** (merah; menyalakannya membuka dialog konfirmasi dengan Batal sebagai fokus). Pane ber-bypass memberi badge
+  merah `bypass izin` di header; pane ber-worktree memberi badge branch. Split (`⌘D`) tetap satu program tanpa sakelar.
 
 ### 4.2 Kartu persetujuan spawn (SPN-01)
 Muncul di bagian atas pane peminta, menutupi baris teratas terminal, **tanpa mengambil fokus**.

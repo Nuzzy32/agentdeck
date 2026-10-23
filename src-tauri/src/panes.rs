@@ -73,6 +73,8 @@ struct Entry {
     session: Option<String>,
     /// `pane_claim` (D-033): absolute paths, released when the process exits or the pane closes.
     claims: Vec<PathBuf>,
+    /// This run was started with permissions bypassed (D-034); never restored, never on a run again.
+    bypass: bool,
 }
 
 impl Entry {
@@ -97,6 +99,7 @@ impl Entry {
             },
             parent: self.parent.clone(),
             exited: self.exited,
+            bypass: self.bypass,
         }
     }
 }
@@ -117,6 +120,12 @@ pub struct Spec {
     pub task: Option<String>,
     pub rows: u16,
     pub cols: u16,
+    /// Launcher switch "worktree per terminal" (D-034): a new agent pane gets its own git worktree.
+    #[serde(default)]
+    pub worktree: bool,
+    /// Launcher switch "bypass izin" (D-034), only for a new agent pane the person opens.
+    #[serde(default)]
+    pub bypass: bool,
 }
 
 /// Result of [`Registry::open`]: what starting the process needs.
@@ -129,6 +138,21 @@ pub struct Opened {
     pub old_pty: Option<u32>,
     /// Session to resume: a run again of the same agent without a task, when one is known (D-030).
     pub resume: Option<String>,
+    pub bypass: bool,
+}
+
+/// `worktree` and `bypass` only for a new agent pane the person opens (D-034): never a shell, a run again, or a
+/// child of `pane_spawn`, so neither a restored layout nor an agent can turn them on.
+fn check_spec(spec: &Spec) -> Result<(), LaunchError> {
+    if !(spec.worktree || spec.bypass) {
+        return Ok(());
+    }
+    if spec.agent.is_none() || spec.pane.is_some() || spec.parent.is_some() {
+        return Err(LaunchError::new(
+            "Worktree dan bypass hanya untuk pane agen baru yang dibuka dari peluncur.",
+        ));
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -142,6 +166,8 @@ pub struct PaneInfo {
     pub can_read: bool,
     /// Absolute paths this pane claimed with `pane_claim` (D-033).
     pub claims: Vec<String>,
+    /// Runs with permissions bypassed (D-034): only its own children may send to it.
+    pub bypass: bool,
 }
 
 /// `pane_list` result (MCP-TOOLS).
@@ -321,6 +347,7 @@ impl Registry {
 
     /// Registers a new pane, or prepares `spec.pane` for a restart, and issues an agent pane its token.
     pub fn open(&mut self, spec: &Spec) -> Result<Opened, LaunchError> {
+        check_spec(spec)?;
         let now = Instant::now();
         let screen = spec
             .agent
@@ -345,6 +372,7 @@ impl Registry {
                 e.exited = false;
                 // The old process may not have exited (its event is now ignored): its claims go with it.
                 e.claims.clear();
+                e.bypass = false;
                 (id.clone(), e.generation, e.pty.take(), resume)
             }
             None => {
@@ -370,6 +398,7 @@ impl Registry {
                     worktree: None,
                     session: None,
                     claims: Vec::new(),
+                    bypass: spec.bypass,
                 });
                 (id, 0, None, None)
             }
@@ -394,6 +423,7 @@ impl Registry {
             screen,
             old_pty,
             resume,
+            bypass: spec.bypass && spec.pane.is_none(),
         })
     }
 
@@ -487,6 +517,8 @@ impl Registry {
                     worktree: p.worktree.clone(),
                     session: p.session.clone(),
                     claims: Vec::new(),
+                    // A file never turns bypass on (D-034).
+                    bypass: false,
                 });
             }
         }
@@ -557,6 +589,7 @@ impl Registry {
             kind: PaneKind::Agent,
             parent: Some(parent.clone()),
             exited: false,
+            bypass: false,
         }));
         policy::check_spawn(&me, &all, &self.limits, &mut self.spawn_rate, now, enabled)?;
         if reserve {
@@ -637,6 +670,7 @@ impl Registry {
                     can_send: policy::can_send(me, p, peer).is_ok(),
                     can_read: policy::can_read(me, p, peer).is_ok(),
                     claims: e.claims.iter().map(|c| c.display().to_string()).collect(),
+                    bypass: e.bypass,
                 })
             })
             .collect();
@@ -993,6 +1027,11 @@ impl Registry {
 pub struct Started {
     pub pane: String,
     pub pty: u32,
+    /// Folder the process runs in: the worktree's when one was made, so the UI saves and reruns it there.
+    pub cwd: String,
+    /// Branch of the pane's own worktree (D-034, T4.1).
+    pub branch: Option<String>,
+    pub bypass: bool,
 }
 
 /// Stops a PTY in the background; a pane being restarted has usually exited already, so this returns at once.
@@ -1020,6 +1059,7 @@ pub fn start(
         )));
     }
     let opened = lock(panes).open(spec)?;
+    let bypass = opened.bypass;
     if let Some(old) = opened.old_pty {
         stop(pm, old);
     }
@@ -1047,6 +1087,7 @@ pub fn start(
                 env,
                 mcp,
                 opened.resume.as_deref(),
+                opened.bypass,
             )
             .map_err(fail)?
         }
@@ -1075,7 +1116,58 @@ pub fn start(
             "Pane {id} ditutup saat dijalankan."
         )));
     }
-    Ok(Started { pane: id, pty })
+    Ok(Started {
+        pane: id,
+        pty,
+        cwd: spec.cwd.clone(),
+        branch: None,
+        bypass,
+    })
+}
+
+/// [`start`] inside a new git worktree of `root` (the repository of `spec.cwd`), at the same place relative to the
+/// repository. The worktree is named after the pane id it will most likely get and is removed again when the start
+/// fails; the pane owns it afterwards (cleaned up on close when unchanged). `pane_spawn { worktree }` (T4.1) and the
+/// launcher's "worktree per terminal" (D-034) both come through here.
+pub fn start_in_worktree(
+    panes: &Panes,
+    pm: &PaneManager,
+    mcp_url: Option<&str>,
+    env: Vec<(String, OsString)>,
+    spec: &Spec,
+    root: &Path,
+    on_event: OnEvent,
+) -> Result<Started, LaunchError> {
+    let cwd = Path::new(&spec.cwd)
+        .canonicalize()
+        .map_err(|e| LaunchError::new(format!("Folder tidak ditemukan: {} ({e})", spec.cwd)))?;
+    let name = lock(panes).next_id();
+    let wt = worktree::create(root, &name)
+        .map_err(|e| LaunchError::new(format!("Worktree tidak bisa dibuat: {e}.")))?;
+    let dir = wt
+        .path
+        .join(cwd.strip_prefix(root).unwrap_or(Path::new("")));
+    let Some(dir) = dir.to_str().map(str::to_owned) else {
+        worktree::cleanup(&wt);
+        return Err(LaunchError::new("Path folder bukan UTF-8."));
+    };
+    let spec = Spec {
+        cwd: dir,
+        worktree: false,
+        ..spec.clone()
+    };
+    let mut started = match start(panes, pm, mcp_url, env, &spec, on_event) {
+        Ok(s) => s,
+        Err(e) => {
+            worktree::cleanup(&wt);
+            return Err(e);
+        }
+    };
+    started.branch = Some(wt.branch.clone());
+    if let Err(wt) = lock(panes).set_worktree(&started.pane, wt) {
+        worktree::cleanup(&wt); // closed already
+    }
+    Ok(started)
 }
 
 /// Shell (`agent` None) or a catalogue agent, new (`pane` None) or run again in an existing pane. The core gives the
@@ -1085,10 +1177,32 @@ pub async fn pane_create(
     panes: State<'_, Panes>,
     pm: State<'_, PaneManager>,
     mcp: State<'_, McpStatus>,
+    engine: State<'_, crate::delivery::Engine>,
     spec: Spec,
     on_event: Channel<PaneEvent>,
 ) -> Result<Started, LaunchError> {
-    let url = match *mcp {
+    let started = create(&panes, &pm, &mcp, spec.clone(), on_event)?;
+    if started.bypass {
+        let agent = spec.agent.as_deref().unwrap_or_default();
+        engine.audit(
+            &spec.workspace.to_string(),
+            &Audit::PaneBypass {
+                pane: &started.pane,
+                agent,
+            },
+        );
+    }
+    Ok(started)
+}
+
+fn create(
+    panes: &Panes,
+    pm: &PaneManager,
+    mcp: &McpStatus,
+    spec: Spec,
+    on_event: Channel<PaneEvent>,
+) -> Result<Started, LaunchError> {
+    let url = match mcp {
         McpStatus::Running { port } => Some(format!("http://127.0.0.1:{port}/mcp")),
         McpStatus::Off { .. } => None,
     };
@@ -1096,7 +1210,21 @@ pub async fn pane_create(
     let on_event: OnEvent = Box::new(move |ev| {
         let _ = on_event.send(ev);
     });
-    start(&panes, &pm, url.as_deref(), env, &spec, on_event)
+    if !spec.worktree {
+        return start(panes, pm, url.as_deref(), env, &spec, on_event);
+    }
+    // Checked before any worktree exists; `start` checks the rest (`check_spec`).
+    if spec.agent.is_none() || spec.pane.is_some() {
+        return Err(LaunchError::new(
+            "Worktree hanya untuk pane agen baru yang dibuka dari peluncur.",
+        ));
+    }
+    let root = worktree::repo_root(Path::new(&spec.cwd)).ok_or_else(|| {
+        LaunchError::new(
+            "Folder ini bukan repo git; matikan \"worktree per terminal\" atau pilih folder repo.",
+        )
+    })?;
+    start_in_worktree(panes, pm, url.as_deref(), env, &spec, &root, on_event)
 }
 
 /// A child's worktree left in place on close because it has changes (UI-UX §5: told in a toast).
@@ -1169,6 +1297,8 @@ mod tests {
             task: None,
             rows: 24,
             cols: 80,
+            worktree: false,
+            bypass: false,
         }
     }
 
@@ -1342,6 +1472,60 @@ mod tests {
                 .unwrap_err()
                 .starts_with("UNKNOWN_PANE: ")
         );
+    }
+
+    /// D-034: worktree and bypass only for a new agent pane the person opens; bypass shows in `pane_list`, is gone on a
+    /// run again, and never comes back from a restored layout.
+    #[test]
+    fn bypass_only_for_new_agent_panes_and_never_kept() {
+        let mut r = Registry::default();
+        let ws = r.create_workspace();
+        let refused = |s: Spec| s;
+        for bad in [
+            refused(Spec {
+                bypass: true,
+                ..spec(ws, None)
+            }),
+            refused(Spec {
+                worktree: true,
+                ..spec(ws, None)
+            }),
+            refused(Spec {
+                bypass: true,
+                parent: Some("p1".into()),
+                ..spec(ws, Some("claude-code"))
+            }),
+        ] {
+            assert!(r.open(&bad).is_err(), "{bad:?}");
+        }
+        let peer = r.open(&spec(ws, Some("codex"))).unwrap().id;
+        let b = r
+            .open(&Spec {
+                bypass: true,
+                ..spec(ws, Some("claude-code"))
+            })
+            .unwrap();
+        assert!(b.bypass);
+        let listed = r.list(&peer).unwrap();
+        let me = listed.panes.iter().find(|p| p.id == b.id).unwrap();
+        assert!(
+            me.bypass && !me.can_send,
+            "a peer cannot send to a bypassed pane"
+        );
+        // Run again: refused with bypass, and a plain run again turns it off.
+        let again = Spec {
+            pane: Some(b.id.clone()),
+            ..spec(ws, Some("claude-code"))
+        };
+        assert!(
+            r.open(&Spec {
+                bypass: true,
+                ..again.clone()
+            })
+            .is_err()
+        );
+        assert!(!r.open(&again).unwrap().bypass);
+        assert!(!r.list(&peer).unwrap().panes.iter().any(|p| p.bypass));
     }
 
     #[test]

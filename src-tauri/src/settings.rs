@@ -633,6 +633,7 @@ mod tests {
             kind: PaneKind::Agent,
             parent: None,
             exited: false,
+            bypass: false,
         };
         let child = Pane {
             id: "p2".into(),

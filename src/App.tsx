@@ -43,7 +43,7 @@ import { Launcher, SHELL } from "./launcher/Launcher";
 import { serial } from "./pane/io";
 import { measureCell } from "./pane/TerminalPane";
 import { Palette } from "./prompts/Palette";
-import { pasteInto, type Preset, presetTree } from "./prompts/prompts";
+import { gridTree, pasteInto, type Preset } from "./prompts/prompts";
 import { type Section, SettingsModal } from "./settings/SettingsModal";
 import { TerminalContext, useSettings } from "./settings/settings";
 import { type KeptWorktree, keptText, placeChild, refusedText, spawnClient } from "./spawn/spawned";
@@ -262,6 +262,8 @@ function App() {
     task: string,
     workspace: number,
     restart: boolean,
+    // D-034 launcher switches; only a new agent pane may carry them (the core refuses anything else).
+    opts: { worktree?: boolean; bypass?: boolean } = {},
   ): Promise<{ id: string } | { error: LaunchError }> => {
     const spawn = ids.current.spawn++;
     const pane: Pane = {
@@ -290,21 +292,36 @@ function App() {
     const ch = new Channel<PaneEvent>();
     ch.onmessage = (ev) => (id === null ? early.push(ev) : update((p) => applyEvent(p, ev)));
     try {
-      const started = await invoke<{ pane: string; pty: number }>("pane_create", {
-        spec: {
-          workspace,
-          pane: restart ? base.id : null,
-          agent: pane.agentId,
-          title: pane.title,
-          cwd: pane.cwd,
-          task: task || null,
-          rows: 24,
-          cols: 80,
+      const extra = pane.agentId && !restart;
+      const started = await invoke<{ pane: string; pty: number; cwd: string; branch: string | null; bypass: boolean }>(
+        "pane_create",
+        {
+          spec: {
+            workspace,
+            pane: restart ? base.id : null,
+            agent: pane.agentId,
+            title: pane.title,
+            cwd: pane.cwd,
+            task: task || null,
+            rows: 24,
+            cols: 80,
+            worktree: Boolean(extra && opts.worktree),
+            bypass: Boolean(extra && opts.bypass),
+          },
+          onEvent: ch,
         },
-        onEvent: ch,
-      });
+      );
       id = started.pane;
-      const ready = early.reduce(applyEvent, { ...pane, id: started.pane, ptyId: started.pty });
+      const ready = early.reduce(applyEvent, {
+        ...pane,
+        id: started.pane,
+        ptyId: started.pty,
+        // A worktree pane runs (and is saved, and runs again) in its worktree.
+        cwd: started.cwd,
+        folder: tilde(started.cwd),
+        branch: started.branch ?? pane.branch,
+        bypass: started.bypass,
+      });
       setPanes((all) => ({ ...all, [started.pane]: ready }));
       // An agent that never reports leaves `starting` for the output heuristic.
       if (pane.agentId) {
@@ -452,10 +469,15 @@ function App() {
   };
 
   /**
-   * Session preset (D-032): a new workspace with the preset's agents through the same `pane_create` as the launcher,
-   * so they get the catalogue's arguments and nothing else. All or nothing: if one fails, the started ones close.
+   * Several panes in a new workspace at once: session presets (D-032) and the launcher's counts (D-034). Every pane
+   * goes through the same `pane_create` as the launcher, so it gets the catalogue's arguments and nothing else. All or
+   * nothing: if one fails, the started ones close (an unchanged worktree goes with its pane).
    */
-  const openPreset = async (preset: Preset, cwd: string): Promise<LaunchError | null> => {
+  const openMany = async (
+    programs: readonly string[],
+    cwd: string,
+    opts: { task?: string; worktree?: boolean; bypass?: boolean } = {},
+  ): Promise<LaunchError | null> => {
     if (creating.current) return null;
     creating.current = true;
     try {
@@ -466,8 +488,10 @@ function App() {
         return toLaunchError(e);
       }
       const started: string[] = [];
-      for (const agentId of preset.agents) {
-        const res = await startPty(newPane(agentId, cwd, ""), "", ws, false);
+      for (const pick of programs) {
+        const agentId = pick === SHELL ? null : pick;
+        const task = agentId ? (opts.task ?? "") : "";
+        const res = await startPty(newPane(agentId, cwd, task), task, ws, false, opts);
         if ("error" in res) {
           setPanes((all) => Object.fromEntries(Object.entries(all).filter(([id]) => !started.includes(id))));
           for (const id of started) invoke("pane_close", { pane: id }).catch(() => undefined);
@@ -476,13 +500,33 @@ function App() {
         }
         started.push(res.id);
       }
-      addWorkspace(ws, cwd, presetTree(started, preset.dir), started[0] ?? "");
+      addWorkspace(ws, cwd, gridTree(started), started[0] ?? "");
       rememberFolder(cwd);
-      setPalette(false);
       return null;
     } finally {
       creating.current = false;
     }
+  };
+
+  const openPreset = async (preset: Preset, cwd: string): Promise<LaunchError | null> => {
+    const err = await openMany(preset.agents, cwd);
+    if (!err) setPalette(false);
+    return err;
+  };
+
+  /** Launcher in workspace mode (D-034): counts per program, worktree per terminal, bypass. */
+  const launchMany = async (
+    programs: string[],
+    cwd: string,
+    opts: { task: string; worktree: boolean; bypass: boolean },
+  ): Promise<LaunchError | null> => {
+    const err = await openMany(programs, cwd, opts);
+    if (!err) {
+      const first = programs.find((p) => p !== SHELL) ?? programs[0];
+      if (first) setChoice(first);
+      setLauncher(null);
+    }
+    return err;
   };
 
   /** Palette prompt: into the focused pane's terminal as a paste, without Enter (D-032). */
@@ -807,6 +851,7 @@ function App() {
             recents={recents}
             home={home}
             onLaunch={launch}
+            onLaunchMany={launcher.kind === "workspace" ? launchMany : undefined}
             onClose={() => setLauncher(null)}
           />
         ) : null}

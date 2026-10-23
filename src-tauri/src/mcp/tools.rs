@@ -241,6 +241,8 @@ mod tests {
             task: None,
             rows: 24,
             cols: 80,
+            worktree: false,
+            bypass: false,
         }
     }
 

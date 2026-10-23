@@ -559,7 +559,7 @@ halaman merek OpenAI menjawab 403 (hanya terbaca lewat cuplikan pencarian, belum
   keluar `cwd`/symlink/bentuk, `panes` tumpang tindih dan pelepasan, `mcp::tools` alur tool), integrasi HTTP
   (`tests/mcp_server.rs`: `CLAIMED` menyebut pemilik, `pane_list` memuat klaim). Belum diuji dengan agen asli.
 
-## D-034 — Peluncur multi-terminal ala MXterm; flag bypass untuk pane yang dibuka orang (TERTUNDA, 2026-10-23)
+## D-034 — Peluncur multi-terminal ala MXterm; flag bypass untuk pane yang dibuka orang (2026-10-23)
 - Permintaan pemilik: di dialog workspace baru pilih folder, jumlah terminal sekaligus (berapa Claude, berapa Codex),
   sakelar "bypass izin untuk semua terminal", dan sakelar "worktree baru per terminal".
 - Acuan konsep: peluncur MXterm Pro (jumlah terminal per agen, satu sakelar bypass untuk semua, worktree per terminal).
@@ -573,4 +573,27 @@ halaman merek OpenAI menjawab 403 (hanya terbaca lewat cuplikan pencarian, belum
   `--permission-mode acceptEdits`, Codex `--full-auto`: sandbox tetap, edit di folder kerja tanpa tanya); (c) bypass
   penuh hanya untuk pane yang dibuka orang, mati bawaan, dengan pagar: konfirmasi saat dinyalakan, badge merah di header,
   pane ber-bypass tidak menerima `pane_send` dari peer, anak dari `pane_spawn` tetap tanpa bypass.
-- Status: menunggu keputusan pemilik. Bagian jumlah terminal dan worktree boleh dikerjakan lebih dulu.
+- **Diputuskan pemilik 2026-10-23: (c).** Bypass penuh hanya untuk pane yang dibuka orang lewat peluncur, mati bawaan,
+  dengan pagar di atas. Agen yang dibuka agen (`pane_spawn`) tetap tidak pernah mendapat bypass (AGENTS.md aturan 4,
+  PRD prinsip 2). ARCHITECTURE §4 "Yang tidak pernah dilakukan" disesuaikan: `--dangerously-*` hanya dari sakelar
+  orang di peluncur, tidak pernah dari agen, tool MCP, atau katalog pengguna.
+- **Implementasi (2026-10-23).** Flag dari tabel `BYPASS` di `catalogue.rs` (`Agent::bypass_arg`); agen dari
+  `agents.toml`, termasuk yang `replace = true`, ditandai `from_user` dan tidak pernah mendapatnya; TOML tetap menolak
+  flag bypass saat parse. `launch::agent(.., bypass)` menaruh flag sebagai elemen sendiri tepat setelah program.
+  `Spec { worktree, bypass }` (`serde(default)`), diperiksa `check_spec`: hanya pane agen baru tanpa induk; pane yang
+  dijalankan ulang dan pane dari `layout.json` selalu tanpa bypass (layout tidak menyimpannya), jadi bypass dan resume
+  (D-030) tidak pernah bersamaan. `policy::can_send` menolak `TARGET_BYPASS` kecuali pengirimnya anak pane itu;
+  `pane_read` tidak terpengaruh. `pane_list` memuat `bypass`. Peluncuran ber-bypass diaudit (`pane_bypass`).
+  Worktree: `panes::start_in_worktree` dipakai bersama `pane_spawn` (kode worktree spawn dipindah ke sini),
+  `pane_create` memakai `worktree::repo_root` dan menolak folder bukan repo git. `Started` membawa `cwd`/`branch`/
+  `bypass`, sehingga UI menyimpan dan menjalankan ulang pane di worktree-nya.
+- UI: peluncur workspace (stepper per program, pintasan, dua sakelar, `BypassDialog`), `openMany` menggantikan
+  `openPreset` dengan rollback yang sama, `gridTree` membagi rata (menggantikan `presetTree` yang 1/2, 1/4, 1/4).
+- Batasan: Claude menanyakan "trust this folder" di setiap worktree baru dan menampilkan layar persetujuan bypass-nya
+  sendiri; jawabannya milik orang dan disimpan Claude sendiri (agentdeck tidak menulis config, aturan 3). Ukuran
+  minimum pane tidak diperiksa sebelum 8 pane dibuka.
+- Uji: unit Rust (katalog, launch argv, policy, registri: 200 lulus), vitest (peluncur, badge, `gridTree`, `expand`:
+  120 lulus), `tests/bypass_cli.rs` (manual, `--ignored`) dengan Claude 2.1.308 dan Codex 0.163.0 asli lewat
+  `start_in_worktree`: proses anak berjalan dengan flag bypass masing-masing, tiap pane di `.worktrees/pN` sendiri,
+  saat ditutup worktree dan branch yang tidak berubah terhapus, tidak ada proses tersisa. Peluncur belum diklik di
+  aplikasi: layar terkunci saat diuji (tidak ada app frontmost, screenshot jendela gagal).

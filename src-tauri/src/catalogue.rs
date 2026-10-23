@@ -25,6 +25,14 @@ const MCP_URL: &str = "{mcp_url}";
 const TASK: &str = "{task}";
 const SESSION: &str = "{session}";
 
+/// Flag bypass izin agen bawaan, hanya untuk pane yang dibuka orang dengan sakelar peluncur (D-034). Sengaja di Rust,
+/// tidak di TOML: katalog (bawaan maupun pengguna) tetap menolak flag bypass saat parse, jadi tidak ada berkas yang bisa
+/// menambah atau mengganti flag ini.
+const BYPASS: [(&str, &str); 2] = [
+    ("claude-code", "--dangerously-skip-permissions"),
+    ("codex", "--dangerously-bypass-approvals-and-sandbox"),
+];
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum StatusSource {
@@ -73,6 +81,9 @@ pub struct Agent {
     /// Dari `agent-paths.json`, bukan dari TOML.
     #[serde(skip)]
     pub path_override: Option<PathBuf>,
+    /// Berasal dari `agents.toml` (termasuk `replace = true`): tidak pernah mendapat [`Agent::bypass_arg`].
+    #[serde(skip)]
+    pub from_user: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -161,7 +172,8 @@ impl Catalogue {
                 None
             }
         };
-        for agent in user.map(|u| u.agents).unwrap_or_default() {
+        for mut agent in user.map(|u| u.agents).unwrap_or_default() {
+            agent.from_user = true;
             match cat.agents.iter_mut().find(|a| a.id == agent.id) {
                 Some(old) if agent.replace => {
                     eprintln!(
@@ -283,6 +295,17 @@ impl Agent {
             );
         }
         Ok(())
+    }
+
+    /// Flag bypass izin agen ini (D-034); `None` untuk agen pengguna atau agen bawaan tanpa entri [`BYPASS`].
+    pub fn bypass_arg(&self) -> Option<&'static str> {
+        if self.from_user {
+            return None;
+        }
+        BYPASS
+            .iter()
+            .find(|(id, _)| *id == self.id)
+            .map(|(_, f)| *f)
     }
 
     /// Argumen setelah nama program. Tanpa `mcp_url` tidak ada injeksi MCP; tugas kosong tidak menambah `--`.
@@ -885,6 +908,27 @@ api_key_env = ["GEMINI_API_KEY"]
         let cat = Catalogue::load_from(Some(&dir)).unwrap();
         assert_eq!(ids(&cat), ["claude-code", "codex"]);
         assert_eq!(cat.get("codex").unwrap().binary, "gemini");
+        // D-034: a replaced built-in comes from the user's file, so a swapped binary never gets the bypass flag.
+        assert_eq!(cat.get("codex").unwrap().bypass_arg(), None);
+        assert_eq!(
+            cat.get("claude-code").unwrap().bypass_arg(),
+            Some("--dangerously-skip-permissions")
+        );
+    }
+
+    /// D-034: bypass flags come only from the Rust table, for built-in agents; TOML can never name one.
+    #[test]
+    fn bypass_arg_only_for_builtin_agents() {
+        let cat = Catalogue::embedded().unwrap();
+        assert_eq!(
+            cat.get("codex").unwrap().bypass_arg(),
+            Some("--dangerously-bypass-approvals-and-sandbox")
+        );
+        let mut user = cat.get("claude-code").unwrap().clone();
+        user.from_user = true;
+        assert_eq!(user.bypass_arg(), None);
+        let src = agent_toml("", r#"["--", "{task}"]"#);
+        assert!(Catalogue::parse(&format!("{src}bypass_args = [\"--yolo\"]\n")).is_err());
     }
 
     #[test]

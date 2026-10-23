@@ -48,3 +48,13 @@ describe("PaneView header report (T4.2)", () => {
     expect(html(child)).not.toContain("pane-report");
   });
 });
+
+describe("PaneView header bypass and worktree (D-034)", () => {
+  it("marks a bypassed pane in red words and shows its worktree branch", () => {
+    const out = html({ ...child, parent: undefined, bypass: true, branch: "agent/p3" });
+    expect(out).toContain('class="badge pane-bypass"');
+    expect(out).toContain("bypass izin");
+    expect(out).toContain("agent/p3");
+    expect(html(child)).not.toContain("pane-bypass");
+  });
+});

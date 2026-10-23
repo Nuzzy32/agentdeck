@@ -155,7 +155,13 @@ codex -c 'mcp_servers.agentdeck.url="http://127.0.0.1:<port>/mcp"' \
 
 ### Yang tidak pernah dilakukan
 Menulis `~/.claude.json`, `~/.claude/settings.json`, atau `~/.codex/config.toml`; memakai `--dangerously-*`,
-`--yolo`, `bypassPermissions`; membaca keychain atau berkas kredensial; menjalankan agen lewat shell.
+`--yolo`, `bypassPermissions` kecuali satu pengecualian di bawah; membaca keychain atau berkas kredensial; menjalankan
+agen lewat shell.
+
+**Pengecualian (D-034):** pane agen baru yang dibuka **orang** dari peluncur dengan sakelar "Lewati izin" (mati bawaan,
+dikonfirmasi) mendapat flag bypass dari tabel di `catalogue.rs` (bukan dari TOML; agen katalog pengguna tidak pernah).
+Tidak pernah untuk `pane_spawn`, pane yang dijalankan ulang, atau pane dari `layout.json`. Pane itu hanya menerima
+`pane_send`/`pane_report` dari anaknya sendiri (`TARGET_BYPASS`), dan setiap peluncurannya diaudit (`pane_bypass`).
 
 ## 5. Pengiriman pesan antar agen
 
