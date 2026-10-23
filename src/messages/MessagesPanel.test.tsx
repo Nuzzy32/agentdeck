@@ -13,6 +13,7 @@ const msg = (id: string, state: MessageState, text = `text ${id}`): PanelMessage
   reason: state === "dropped" ? "target agent exited" : null,
   text,
   held: false,
+  wait: null,
 });
 
 const ALL = [msg("m1", "delivered"), msg("m2", "queued"), msg("m3", "paused"), msg("m4", "dropped")];

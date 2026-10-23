@@ -20,7 +20,21 @@ export type MessageRow = {
   text: string;
   /** Queued or paused for 10 minutes or more (MSG-07). */
   held: boolean;
+  /** Why a queued message is not pasted yet (core `WaitReason`); null before the first try. */
+  wait: string | null;
 };
+
+const WAIT_TEXT: Record<string, string> = {
+  paused: "ditahan pengaman putaran",
+  busy: "agen sedang bekerja",
+  not_quiet: "menunggu layar tenang",
+  typing: "kamu sedang mengetik",
+  input_not_empty: "kosongkan input",
+  input_unknown: "input tidak terbaca",
+};
+
+/** Text for a `wait` code; unknown codes (a newer core) show nothing rather than a raw code. */
+export const waitText = (wait: string | null): string | null => (wait ? (WAIT_TEXT[wait] ?? null) : null);
 
 export type LoopGuard = { count: number; limit: number; paused: boolean };
 
@@ -67,6 +81,16 @@ export const isWaiting = (m: Pick<MessageRow, "state">) => m.state === "queued" 
 export function pendingByPane(messages: MessageRow[]): Record<string, number> {
   const out: Record<string, number> = {};
   for (const m of messages) if (isWaiting(m)) out[m.to] = (out[m.to] ?? 0) + 1;
+  return out;
+}
+
+/** Why each target pane's queue waits, for the chip: one reason per target, so the first that has one. */
+export function waitByPane(messages: MessageRow[]): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const m of messages) {
+    const text = m.state === "queued" ? waitText(m.wait) : null;
+    if (text && !(m.to in out)) out[m.to] = text;
+  }
   return out;
 }
 

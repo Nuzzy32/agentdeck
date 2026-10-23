@@ -17,6 +17,7 @@ use tauri::ipc::Channel;
 use crate::catalogue::{self, Catalogue};
 use crate::delivery::{
     self, Action, Delivery, DropReason, PaneStatus, Poll, Sender, State as MsgState, Target,
+    WaitReason,
 };
 use crate::launch::{self, LaunchError, Mcp};
 use crate::layout::Layout;
@@ -174,6 +175,8 @@ pub struct MessageRow {
     pub text: String,
     /// Waiting (queued or paused) for [`delivery::HELD_AFTER`] or longer (MSG-07).
     pub held: bool,
+    /// Why a queued row is not pasted yet ([`WaitReason::as_str`]); `None` before the first try or when not queued.
+    pub wait: Option<&'static str>,
 }
 
 impl Record {
@@ -194,6 +197,7 @@ impl Record {
             },
             text: self.text.clone(),
             held: waiting && now_ms.saturating_sub(self.ts) >= held_ms,
+            wait: None,
         }
     }
 }
@@ -219,7 +223,10 @@ pub struct Sent {
 #[derive(Debug)]
 pub enum Step {
     Empty,
-    Wait,
+    /// `notify`: the target's wait reason changed, so the UI of this workspace reloads its rows.
+    Wait {
+        notify: Option<String>,
+    },
     /// Write `actions` to `pty`, then publish `changed` (the delivered record first) and `guard`.
     Deliver {
         id: String,
@@ -250,6 +257,8 @@ pub struct Registry {
     messages: Vec<Record>,
     /// Targets whose delivery worker is running.
     workers: HashSet<String>,
+    /// Last reason each target's queue waited for, until it delivers or empties.
+    waits: HashMap<String, WaitReason>,
     /// `pane_read` call times per caller, for READ_RATE.
     reads: HashMap<String, VecDeque<Instant>>,
     /// `pane_spawn` requests shown to the person in the last 10 minutes (app-wide, SPN-02).
@@ -623,8 +632,25 @@ impl Registry {
         self.messages
             .iter()
             .filter(|r| r.workspace == ws)
-            .map(|r| r.row(now_ms))
+            .map(|r| {
+                let mut row = r.row(now_ms);
+                if r.state == MsgState::Queued {
+                    row.wait = self.waits.get(&r.to).map(|w| w.as_str());
+                }
+                row
+            })
             .collect()
+    }
+
+    /// Records why `to` waits (`None`: no reason to show); [`Step::Wait`] names the workspace when that changed.
+    fn wait(&mut self, to: &str, ws: u32, why: Option<WaitReason>) -> Step {
+        let before = match why {
+            Some(w) => self.waits.insert(to.to_owned(), w),
+            None => self.waits.remove(to),
+        };
+        Step::Wait {
+            notify: (before != why).then(|| ws.to_string()),
+        }
     }
 
     /// Sets a record's state; returns the updated copy for the log and the UI.
@@ -711,10 +737,11 @@ impl Registry {
             return self.dropped(gone);
         };
         let e = &self.panes[i];
-        if e.pty.is_none() && !e.exited {
-            return Step::Wait; // not running yet; also keeps a forced message from going nowhere
-        }
         let ws = e.workspace;
+        if e.pty.is_none() && !e.exited {
+            // Not running yet; also keeps a forced message from going nowhere.
+            return self.wait(to, ws, None);
+        }
         let (input, last_output, bracketed_paste) = match &e.screen {
             Some(screen) => {
                 let s = screen.lock().unwrap_or_else(|p| p.into_inner());
@@ -747,9 +774,14 @@ impl Registry {
             .get_mut(&ws)
             .map_or(&mut spare, |w| &mut w.guard);
         let was_paused = guard.is_paused();
-        match self.delivery.poll(to, &target, guard, limit, now) {
-            Poll::Empty => Step::Empty,
-            Poll::Wait(_) => Step::Wait,
+        let poll = self.delivery.poll(to, &target, guard, limit, now);
+        if let Poll::Wait(why) = poll {
+            return self.wait(to, ws, Some(why));
+        }
+        // Delivered, dropped or empty: the rows that waited are published or gone, so no notice of their own.
+        self.waits.remove(to);
+        match poll {
+            Poll::Empty | Poll::Wait(_) => Step::Empty,
             Poll::Dropped(gone) => self.dropped(Poll::Dropped(gone)),
             Poll::Deliver { id, actions } => {
                 let paused_now = !was_paused && guard.is_paused();
@@ -1340,13 +1372,13 @@ mod tests {
         assert_eq!(changed[0].state, MsgState::Delivered);
         assert_eq!((guard.count, guard.limit, guard.paused), (1, 12, false));
         assert_eq!(r.list("p1").unwrap().panes[1].status, "working");
-        assert!(matches!(r.poll("p2", no_typing, now), Step::Wait));
+        assert!(matches!(r.poll("p2", no_typing, now), Step::Wait { .. }));
         r.event("p2", 0, &idle());
         // The person typed 1 s ago: wait for typing_ms.
         let typed = |_| Some(now);
         assert!(matches!(
             r.poll("p2", typed, now + Duration::from_secs(1)),
-            Step::Wait
+            Step::Wait { .. }
         ));
         assert!(matches!(
             r.poll("p2", typed, now + Duration::from_secs(2)),
@@ -1365,7 +1397,7 @@ mod tests {
         let screen = r.screen("p2").unwrap();
         screen.lock().unwrap().process(b"draft");
         let later = Instant::now() + Duration::from_secs(60);
-        assert!(matches!(r.poll("p2", no_typing, later), Step::Wait));
+        assert!(matches!(r.poll("p2", no_typing, later), Step::Wait { .. }));
         screen.lock().unwrap().process(b"\x1b[1;3H\x1b[K");
         assert!(matches!(
             r.poll("p2", no_typing, later),
@@ -1403,7 +1435,7 @@ mod tests {
         };
         assert_eq!((guard.count, guard.paused), (2, true));
         assert_eq!(changed.last().map(|c| c.state), Some(MsgState::Paused));
-        assert!(matches!(deliver(&mut r), Step::Wait));
+        assert!(matches!(deliver(&mut r), Step::Wait { .. }));
         // New messages while paused report `paused`.
         assert_eq!(
             r.send("p1", "p2", "d", 1).unwrap().record.state,
@@ -1486,6 +1518,34 @@ mod tests {
         assert_eq!(held(&r, t0 + held_ms), [false, false, false]);
     }
 
+    /// The chip says why a queued message waits; the UI is told only when that reason changes, and the reason is
+    /// gone once the queue delivers.
+    #[test]
+    fn queued_rows_carry_wait_reason_and_notify_on_change() {
+        let (mut r, ws) = pair();
+        r.send("p1", "p2", "a", 1).unwrap();
+        let waits = |r: &Registry| -> Vec<Option<&'static str>> {
+            r.messages_at(ws, 1).iter().map(|m| m.wait).collect()
+        };
+        assert_eq!(waits(&r), [None]);
+        let now = Instant::now();
+        let typed = |_| Some(now);
+        let Step::Wait { notify } = r.poll("p2", typed, now) else {
+            panic!("typing must hold the message")
+        };
+        assert_eq!(notify, Some(ws.to_string()));
+        assert_eq!(waits(&r), [Some("typing")]);
+        let Step::Wait { notify } = r.poll("p2", typed, now) else {
+            panic!("still typing")
+        };
+        assert_eq!(notify, None, "same reason, no new notice");
+        assert!(matches!(
+            r.poll("p2", no_typing, now + Duration::from_secs(5)),
+            Step::Deliver { .. }
+        ));
+        assert_eq!(waits(&r), [None]);
+    }
+
     #[test]
     fn force_refused_while_paused_or_gone_and_delivers_over_typing() {
         let (mut r, ws) = pair();
@@ -1497,7 +1557,7 @@ mod tests {
         screen.lock().unwrap().process(b"draft");
         let now = Instant::now();
         let typed = |_| Some(now);
-        assert!(matches!(r.poll("p2", typed, now), Step::Wait));
+        assert!(matches!(r.poll("p2", typed, now), Step::Wait { .. }));
         // A worker for p2 already runs (from `send`): the caller starts none.
         assert_eq!(r.force("m3"), Ok(("p2".into(), false)));
         let Step::Deliver {
@@ -1545,7 +1605,7 @@ mod tests {
         r.force("m1").unwrap();
         assert!(matches!(
             r.poll("p2", no_typing, Instant::now()),
-            Step::Wait
+            Step::Wait { .. }
         ));
     }
 

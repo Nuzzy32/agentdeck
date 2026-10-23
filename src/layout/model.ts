@@ -58,6 +58,8 @@ export type Pane = {
   restored?: boolean;
   report?: Report;
   pending: number;
+  /** Why those messages are not pasted yet ("kamu sedang mengetik"); absent when the core gave no reason. */
+  pendingWhy?: string;
   /** Core pane id from `pane_create`; null while spawning or after a failed spawn. */
   ptyId: number | null;
   /** Which spawn of this pane events belong to; a restart makes earlier events stale. */

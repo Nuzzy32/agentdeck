@@ -1,7 +1,7 @@
 // Messages panel, UI-UX §4.4 (MSG-05, MSG-07). Driven by props: rows come from `messages_list`
 // (src/core/messages.ts); Copy, Discard and Send now go back to the caller.
 import { useEffect, useState } from "react";
-import { isWaiting, type MessageRow, type MessageState } from "../core/messages";
+import { isWaiting, type MessageRow, type MessageState, waitText } from "../core/messages";
 import "./messages.css";
 
 /** A row as the panel needs it; the workspace is implied. */
@@ -213,6 +213,7 @@ export function MessagesPanel({
                     <span className={`msgs-state ${s.tone}`}>
                       {s.text}
                       {m.state === "queued" ? ` ${waited(m.ts, clockNow)}` : ""}
+                      {m.state === "queued" && waitText(m.wait) ? ` · ${waitText(m.wait)}` : ""}
                     </span>
                   </span>
                   {m.held ? <span className="badge msgs-held">tertahan &gt; 10 menit</span> : null}

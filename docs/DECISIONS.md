@@ -418,3 +418,15 @@ halaman merek OpenAI menjawab 403 (hanya terbaca lewat cuplikan pencarian, belum
   tidak membuka kotak cari.
 - Uji di aplikasi (`pnpm tauri dev`, pane shell): `hello` → 4 hasil bergaris, "1/4"; Enter → "2/4"; Esc menutup dan
   fokus kembali ke terminal.
+
+## D-028 — Alasan pesan menunggu di chip (2026-10-23)
+- Ide dari riset MXterm Pro (RESEARCH §2, penahanan kiriman dengan alasan). Menuntaskan ARCHITECTURE §5.2 butir 4
+  (chip "kosongkan input") yang belum pernah dibuat.
+- `WaitReason` yang sudah dihitung `delivery::ready` tidak lagi dibuang: `Registry` menyimpan alasan terakhir per pane
+  tujuan, `MessageRow.wait` membawa kodenya (`busy`, `not_quiet`, `typing`, `input_not_empty`, `input_unknown`,
+  `paused`) untuk baris `queued`. Event `messages-changed` dikirim hanya saat alasan berubah, bukan setiap tick.
+  Alasan dihapus saat pesan terkirim, dibuang, atau antrean kosong.
+- UI: chip header `1 pesan · kosongkan input`, baris panel Pesan menambah alasan yang sama. Kode yang tidak dikenal UI
+  (core lebih baru) tidak ditampilkan mentah.
+- Uji di aplikasi (`cargo run` + vite, dua pane Claude Code 2.1.309, saling kirim aktif): draf di input p2, p1 memanggil
+  `pane_send` → chip p2 "1 pesan · kosongkan input"; draf dihapus → pesan terkirim, chip hilang.

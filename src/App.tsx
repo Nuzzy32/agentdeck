@@ -4,7 +4,7 @@ import { homeDir } from "@tauri-apps/api/path";
 import { flushSync } from "react-dom";
 import { nextJump } from "./cards/approvals";
 import { ApprovalStack, useApprovals } from "./cards/Cards";
-import { createCollab, EMPTY, pendingByPane, tauriClient } from "./core/messages";
+import { createCollab, EMPTY, pendingByPane, tauriClient, waitByPane } from "./core/messages";
 import "./layout/layout.css";
 import { nextFontSize, shortcut } from "./layout/keys";
 import { MESSAGES_BREAKPOINT, panelOpen, type PanelOverride, SIDEBAR_BREAKPOINT, togglePanel } from "./layout/logic";
@@ -180,7 +180,8 @@ function App() {
   const wsKey = activeId === null ? null : String(activeId);
   const shared = useSyncExternalStore(collab.subscribe, () => (wsKey === null ? EMPTY : collab.get(wsKey)));
   const pending = pendingByPane(shared.messages);
-  const withPending = (p: Pane): Pane => ({ ...p, pending: pending[p.id] ?? 0 });
+  const why = waitByPane(shared.messages);
+  const withPending = (p: Pane): Pane => ({ ...p, pending: pending[p.id] ?? 0, pendingWhy: why[p.id] });
 
   const toast = (text: string) => {
     const id = ids.current.toast++;

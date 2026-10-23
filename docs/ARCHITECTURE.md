@@ -176,7 +176,8 @@ Semua syarat harus benar:
 
 4. Kotak input agen kosong. Teks yang diketik orang lebih dari `typing_ms` lalu (atau saran samar Claude, D-017) akan
    ikut terkirim bersama tempelan. **[T2.7]** buktikan cara mendeteksinya dari `vt100`; bila tidak bisa, pesan
-   menunggu dan pane diberi chip "pesan menunggu: kosongkan input".
+   menunggu dan pane diberi chip "pesan menunggu: kosongkan input". **Dibuat (D-028):** setiap alasan tunggu tampil di chip
+   (`1 pesan · kosongkan input`, `· kamu sedang mengetik`, `· agen sedang bekerja`, ...).
 
 "Ketikan orang" hanya ketikan dan tempelan sungguhan: `TerminalPane` menandainya dari event keyboard/paste DOM.
 Balasan otomatis xterm.js (DA/DSR, warna `OSC 10/11`, laporan fokus/mouse) juga lewat `onData`, tetapi dikirim dengan

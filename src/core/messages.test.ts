@@ -7,6 +7,7 @@ import {
   type LoopGuard,
   type MessageRow,
   pendingByPane,
+  waitByPane,
 } from "./messages";
 
 const row = (id: string, state: MessageRow["state"], to = "p1"): MessageRow => ({
@@ -19,6 +20,7 @@ const row = (id: string, state: MessageRow["state"], to = "p1"): MessageRow => (
   reason: null,
   text: id,
   held: false,
+  wait: null,
 });
 
 const flush = () => new Promise((r) => setTimeout(r, 0));
@@ -165,6 +167,16 @@ describe("messages", () => {
   it("counts waiting (queued, paused) messages per target pane for the chip", () => {
     const rows = [row("a", "queued"), row("b", "paused"), row("c", "delivered"), row("d", "dropped"), row("e", "queued", "p3")];
     expect(pendingByPane(rows)).toEqual({ p1: 2, p3: 1 });
+  });
+
+  it("names why each target's queue waits; unknown codes and non-queued rows say nothing", () => {
+    const rows = [
+      { ...row("a", "queued"), wait: "typing" },
+      { ...row("b", "queued", "p3"), wait: "from-a-newer-core" },
+      { ...row("c", "delivered", "p4"), wait: "busy" },
+      row("d", "queued", "p5"),
+    ];
+    expect(waitByPane(rows)).toEqual({ p1: "kamu sedang mengetik" });
   });
 });
 

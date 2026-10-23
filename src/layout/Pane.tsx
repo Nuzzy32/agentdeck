@@ -108,8 +108,11 @@ export function PaneView({
         {pane.parent ? <span className="badge pane-relation">anak {pane.parent}</span> : null}
         {pane.report ? <ReportBadge report={pane.report} /> : null}
         {pane.pending > 0 ? (
-          <span className="badge chip" title={`${pane.pending} pesan menunggu dikirim ke ${pane.id}`}>
-            {pane.pending} pesan
+          <span
+            className="badge chip"
+            title={`${pane.pending} pesan menunggu dikirim ke ${pane.id}${pane.pendingWhy ? `: ${pane.pendingWhy}` : ""}`}
+          >
+            {pane.pending} pesan{pane.pendingWhy ? ` · ${pane.pendingWhy}` : ""}
           </span>
         ) : null}
         <span className="pane-actions">

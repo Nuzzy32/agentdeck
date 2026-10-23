@@ -183,6 +183,20 @@ pub enum WaitReason {
     InputUnknown,
 }
 
+impl WaitReason {
+    /// Code in `MessageRow.wait`; the UI turns it into the chip text.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Paused => "paused",
+            Self::Busy => "busy",
+            Self::NotQuiet => "not_quiet",
+            Self::Typing => "typing",
+            Self::InputNotEmpty => "input_not_empty",
+            Self::InputUnknown => "input_unknown",
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DropReason {
     TargetExited,
@@ -515,7 +529,12 @@ impl Engine {
         );
         match step {
             Step::Empty => Tick::Empty,
-            Step::Wait => Tick::Wait,
+            Step::Wait { notify } => {
+                if let Some(workspace) = notify {
+                    (self.notify)(Notice::Messages { workspace });
+                }
+                Tick::Wait
+            }
             Step::Dropped(changed) => {
                 self.publish(changed, None);
                 Tick::Progress
