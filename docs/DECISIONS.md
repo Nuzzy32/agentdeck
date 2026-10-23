@@ -504,4 +504,6 @@ halaman merek OpenAI menjawab 403 (hanya terbaca lewat cuplikan pencarian, belum
   gantinya `TerminalPane` asli dirender di browser lewat Vite yang sama dengan `mockIPC`, diberi byte rekaman zsh
   asli: batang merah di `false` dan `ls /nope` (tooltip `Kode exit 1`), hijau di `echo`, prompt kosong tanpa batang,
   ⌘↑ loncat sampai perintah pertama, ⌘↓ ke berikutnya lalu ke bawah, tidak ada byte yang ditulis ke PTY. Belum
-  terbukti di WebView Tauri: jalur `panes.rs` → `launch::shell` → PTY (tercakup tes unit) dan tampilan di WKWebView.
+  terlihat: penanda gutter dan ⌘↑/⌘↓ di jendela agentdeck (belum ada screenshot jendela), dan pane shell yang dibuka
+  dari aplikasi (jalur `panes.rs` → `launch::shell` → PTY hanya tercakup tes unit). Aplikasi port 1440 ditutup dengan
+  SIGTERM ke prosesnya sendiri karena ⌘Q tidak sampai.
