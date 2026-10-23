@@ -597,3 +597,43 @@ halaman merek OpenAI menjawab 403 (hanya terbaca lewat cuplikan pencarian, belum
   `start_in_worktree`: proses anak berjalan dengan flag bypass masing-masing, tiap pane di `.worktrees/pN` sendiri,
   saat ditutup worktree dan branch yang tidak berubah terhapus, tidak ada proses tersisa. Peluncur belum diklik di
   aplikasi: layar terkunci saat diuji (tidak ada app frontmost, screenshot jendela gagal).
+
+## D-035 — Deteksi status dari layar dengan aturan herdr untuk agen tanpa OSC 7501 (RENCANA, 2026-10-23)
+- **Masalah.** Agen katalog pengguna (`status = "none"`, mis. Gemini, OpenCode, Cursor, Qwen) tidak melapor OSC 7501.
+  Statusnya hanya heuristik output di UI, jadi antrean pesan memperlakukannya `unknown` (menunggu layar sepi) dan
+  `needs_you` tidak pernah muncul saat agen menunggu izin.
+- **Sumber.** [herdr](https://github.com/herdrdev/herdr), Apache-2.0, Rust, commit acuan `6b52662` (2026-10-23);
+  pemberitahuan pihak ketiga MXterm Pro juga mengkreditnya (RESEARCH §2). Diambil langsung dari repo herdr (aturan 8).
+  herdr bukan library (tidak ada `lib.rs`; crate `herdr` 0.1.0 di crates.io basi), jadi kode dan data disalin.
+- **Lisensi (Apache-2.0 §4).** Sertakan `LICENSE` herdr di bundel aplikasi dan entri `THIRD_PARTY_NOTICES`; setiap
+  berkas `.rs`/`.toml` hasil port diberi kepala: asal (repo + commit), lisensi, dan "diubah oleh agentdeck". herdr tidak
+  punya berkas NOTICE dan tidak menyebut pemegang hak cipta; kredit tetap ditulis.
+- **Yang diambil.**
+  - Data aturan: `src/detect/manifests/*.toml` (22 agen, ±50 KB), ditanam dengan `include_str!` di
+    `src-tauri/herdr/manifests/`. **Tanpa** pembaruan jarak jauh herdr (`herdr.dev/agent-detection`), berkas override,
+    atau cache: agentdeck lokal saja (PRD prinsip 4). Aturan diperbarui dengan menyalin ulang dari commit herdr yang
+    baru lalu menjalankan tesnya (aturan herdr berubah 1–3 kali/minggu mengikuti UI CLI).
+  - Mesin (`manifest.rs` herdr, ±550 baris skema/kompilasi/pencocokan/region + ±200 baris validasi) ke modul baru
+    `src-tauri/src/detect.rs`: skema aturan (`state`, `priority`, `region`, `contains`/`regex`/`line_regex`,
+    `all`/`any`/`not`, `visible_*`, `skip_state_update`), prioritas tertinggi menang (seri: aturan lebih awal), batas
+    validasi herdr (128 aturan, kedalaman 8, 512 karakter per pola), region sesuai engine v3.
+  - Debounce (`agent_detection.rs` herdr, ±100 baris): poll 300 ms (100 ms saat menunggu konfirmasi idle), working→idle
+    biasa baru dipublikasikan setelah 3 bacaan atau 700 ms, `blocked`/idle terlihat langsung, masa tenggang 3 s setelah
+    agen mulai, blocker stabil diulang tiap 800 ms, layar tak berubah dilewati.
+- **Rancangan di agentdeck.**
+  - `screen.rs`: teks deteksi sesuai aturan snapshot herdr (baris fisik sebanyak tinggi layar, berakhir di baris non-kosong
+    terakhir atau kursor, `trim_end`, tanpa baris kosong di ujung); judul OSC 0/2 dan progres OSC 9 ditangkap lewat
+    `vt100::Callbacks` (`set_window_title`, `unhandled_osc`), dibersihkan (karakter kontrol dibuang, maks. 256 karakter).
+  - Katalog: `status = "screen"` + `detect = "<id herdr>"` untuk agen pengguna; id divalidasi terhadap manifest tertanam.
+    Claude dan Codex bawaan **tetap OSC 7501** (sinyal resmi, lebih andal); deteksi layar tidak menimpanya.
+  - Satu thread deteksi untuk semua pane `screen` (poll 300 ms) menghasilkan `PaneEvent::Status` yang sama dengan jalur
+    OSC, jadi UI, antrean pesan, dan `pane_list` tidak berubah. Pemetaan: `working` → `working`, `blocked` → `needs_you`
+    (label "butuh kamu"), `idle` → `idle`, `unknown`/`skip_state_update` → status sebelumnya. Tidak pernah mengirim input.
+  - Dependensi baru: `regex = "1"` (crate resmi rust-lang, dipakai mesin herdr); `toml`/`serde` sudah ada.
+- **Tes.** Port 24 tes aturan herdr (`src/detect/manifest/tests.rs`), tes snapshot layar dengan teks layar buatan per agen
+  (blocked/working/idle), tes debounce dengan jam palsu, tes katalog (`detect` tak dikenal ditolak). Di aplikasi: agen
+  pengguna asli yang terpasang (Gemini/OpenCode bila ada), selain itu fake-agent yang menggambar layar contoh.
+- **Ukuran.** ±1000 baris Rust termasuk tes, satu sesi kerja.
+- **Keputusan pemilik yang tersisa.** (1) Setuju menambah `regex`. (2) Deteksi layar juga sebagai cadangan untuk
+  Claude/Codex bila OSC 7501 tidak datang (mis. versi CLI lain)? Saran: belum, OSC tetap satu-satunya sumber untuk
+  keduanya sampai ada kasus nyata.
