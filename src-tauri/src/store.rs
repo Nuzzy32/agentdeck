@@ -48,10 +48,12 @@ pub struct MessageLine {
 #[derive(Clone, Copy, Debug, Serialize)]
 #[serde(tag = "event", rename_all = "snake_case")]
 pub enum Audit<'a> {
+    /// The card is shown.
     SpawnRequested {
         from: &'a str,
         agent: &'a str,
         cwd: &'a str,
+        worktree: bool,
     },
     SpawnApproved {
         from: &'a str,
@@ -59,11 +61,17 @@ pub enum Audit<'a> {
         cwd: &'a str,
         pane: &'a str,
     },
+    /// `reason`: `denied` (by the person, or the requester went away), `timeout`, `launch failed`.
     SpawnDenied {
         from: &'a str,
         agent: &'a str,
         cwd: &'a str,
         reason: &'a str,
+    },
+    /// Refused before any card by the switch, nesting, or a limit; `code` is the MCP-TOOLS code.
+    SpawnRefused {
+        from: &'a str,
+        code: &'a str,
     },
     LoopPaused {
         count: u32,
@@ -406,6 +414,7 @@ mod tests {
                 from: "p1",
                 agent: "codex",
                 cwd: "/w",
+                worktree: true,
             },
             Audit::SpawnApproved {
                 from: "p1",
@@ -581,6 +590,7 @@ mod tests {
                 from: tok,
                 agent: tok,
                 cwd: tok,
+                worktree: true,
             },
             Audit::SpawnApproved {
                 from: tok,
@@ -593,6 +603,10 @@ mod tests {
                 agent: tok,
                 cwd: tok,
                 reason: tok,
+            },
+            Audit::SpawnRefused {
+                from: tok,
+                code: tok,
             },
             Audit::PaneClosed { pane: tok },
         ];

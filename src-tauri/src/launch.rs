@@ -261,7 +261,7 @@ mod tests {
             claude.argv[1..],
             [
                 "--mcp-config",
-                r#"{"mcpServers":{"agentdeck":{"type":"http","url":"${AGENTDECK_MCP_URL}","headers":{"Authorization":"Bearer ${AGENTDECK_TOKEN}"}}}}"#,
+                r#"{"mcpServers":{"agentdeck":{"type":"http","url":"${AGENTDECK_MCP_URL}","headers":{"Authorization":"Bearer ${AGENTDECK_TOKEN}"},"timeout":330000}}}"#,
                 "--allowedTools",
                 "mcp__agentdeck",
                 "--",

@@ -15,19 +15,23 @@ semua agen.
 | Identitas | Pane pemanggil ditentukan dari token. Tidak ada argumen yang memilih pengirim. |
 
 ### Instructions (dikirim di `initialize`)
-Terbukti dibaca kedua agen (S8). Teks disempurnakan di T2.2 dan T3.5:
+Terbukti dibaca kedua agen (S8). Teks disempurnakan di T2.2, T4.2, dan T3.2 (sama persis dengan `INSTRUCTIONS` di
+`mcp/server.rs`):
 
 ```
 You are running inside an agentdeck pane. Other coding agents may run in panes beside you.
 Tools: pane_list (who is here), pane_spawn (open another agent; the person must approve),
-pane_send (send a prompt to your child, your parent, or a peer when allowed), pane_read (read a pane's screen).
+pane_send (send a prompt to your child, your parent, or a peer when allowed), pane_read (read a pane's screen),
+pane_report (a child reports its result to its parent).
 
 Spawn only when work splits into independent parts, or when you want a second opinion from a DIFFERENT agent
 (e.g. codex reviews claude-code's work). Otherwise do the work yourself.
+To ask for a review: pane_spawn {agent: "codex", title: "review: <module>", task: ...}. pane_spawn returns once the
+child runs; then end your turn. Do not poll with pane_read: the child's result is pasted into your terminal.
 Give a child a complete task: goal, files it may change, how to verify, and how to report.
-Ask the child to finish by sending you one line:
+Ask the child to finish by calling pane_report once; it reaches you as one line
   RESULT status=done|failed|blocked files=<paths> tests=pass|fail|none
-followed by a short summary.
+followed by a short summary. If your pane was opened by another agent, report the same way when you finish.
 
 A child's RESULT is a claim. Check the diff and run the tests yourself before telling the person it is done.
 Messages from other agents arrive in your terminal starting with "[agentdeck] message from ...".
@@ -40,7 +44,7 @@ Only the person closes panes. If a tool is refused, read the error code and foll
 | Tool | Anotasi |
 |---|---|
 | `pane_list`, `pane_read` | `readOnlyHint: true` |
-| `pane_spawn`, `pane_send` | `readOnlyHint: false`, `destructiveHint: false`, `openWorldHint: false`, `idempotentHint: false` |
+| `pane_spawn`, `pane_send`, `pane_report` | `readOnlyHint: false`, `destructiveHint: false`, `openWorldHint: false`, `idempotentHint: false` |
 
 ### Bentuk galat
 Galat dikembalikan sebagai hasil tool dengan `isError: true` dan teks `CODE: penjelasan. what to do.` (bukan galat
@@ -79,12 +83,14 @@ Membuka agen di pane baru sebagai anak pemanggil, setelah orang menyetujui.
 | `title` | string | ya | 1–60 karakter, format disarankan `<pekerjaan>: <modul>`. |
 | `task` | string | ya | 1 B – 16 KB, tugas lengkap. Diberikan sebagai prompt awal agen. |
 | `cwd` | string | tidak | Path absolut tanpa `..`, di dalam folder kerja pemanggil. Bawaan: folder pemanggil. |
-| `worktree` | boolean | tidak | **P1.** Buat `git worktree` baru untuk anak. |
+| `worktree` | boolean | tidak | **P1.** Buat `git worktree` baru untuk anak: `.worktrees/<id>` di akar repo, branch `agent/<id>`, `cwd` anak = posisi yang sama di dalam worktree. Butuh repo git (selain itu `BAD_ARGS`). |
 
 Tidak ada argumen untuk perintah, flag, environment, atau mode izin.
 
-**Hasil:** `{"pane": "p2", "cwd": "/abs/path", "status": "starting"}`. Fungsi kembali setelah kartu disetujui dan proses
-berjalan, bukan setelah anak selesai. Hasil anak datang lewat `pane_send` ke `"parent"`.
+**Hasil:** `{"pane": "p2", "cwd": "/abs/path", "status": "starting"}`, ditambah `"branch": "agent/p2"` bila
+`worktree: true`. Fungsi kembali setelah kartu disetujui dan proses berjalan, bukan setelah anak selesai; panggilan bisa
+menunggu sampai batas waktu kartu (≤ 300 detik), jadi kedua agen diluncurkan dengan batas waktu tool 330 detik (D-024).
+Hasil anak datang lewat `pane_report` (atau `pane_send` ke `"parent"`).
 
 **Galat:**
 | Kode | Arti | Saran untuk agen |
@@ -99,7 +105,12 @@ berjalan, bukan setelah anak selesai. Hasil anak datang lewat `pane_send` ke `"p
 | `UNKNOWN_AGENT` | id tidak ada di katalog. Teks galat menyebut id yang tersedia. | Pakai salah satu id dari teks galat. |
 | `AGENT_NOT_INSTALLED` | CLI tidak ditemukan di mesin. | Pilih agen lain atau beri tahu orang. |
 | `CWD_OUTSIDE` | `cwd` di luar folder kerja pemanggil. | Perbaiki path. |
-| `BAD_ARGS` | Argumen tidak valid (panjang, field asing). | Perbaiki argumen. |
+| `SPAWN_FAILED` | Kartu disetujui, tetapi agen atau worktree gagal dibuat (D-024). | Beri tahu orang. |
+| `BAD_ARGS` | Argumen tidak valid (panjang, field asing, `cwd` relatif/berisi `..`/tidak ada, `worktree` di luar repo git). | Perbaiki argumen. |
+
+Pemanggil yang sendiri dibuka agen, sakelar mati, dan batas diperiksa sebelum kartu; agen yang tidak dikenal/terpasang
+dan `cwd` juga, sehingga orang tidak pernah ditanya untuk spawn yang pasti gagal. Rate dihitung per aplikasi saat kartu
+ditampilkan; kartu yang masih menunggu dihitung sebagai anak hidup.
 
 ---
 

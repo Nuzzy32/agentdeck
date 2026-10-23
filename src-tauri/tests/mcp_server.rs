@@ -304,7 +304,13 @@ async fn tools_listed_and_errors_are_tool_results() {
     let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
     assert_eq!(
         names,
-        ["pane_list", "pane_read", "pane_send", "pane_report"],
+        [
+            "pane_list",
+            "pane_read",
+            "pane_spawn",
+            "pane_send",
+            "pane_report"
+        ],
         "{msg}"
     );
     assert_eq!(tools[1]["annotations"]["readOnlyHint"], true);

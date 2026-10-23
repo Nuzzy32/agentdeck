@@ -1,4 +1,5 @@
-//! The agent-facing tools (MCP-TOOLS): `pane_list`, `pane_read`, `pane_send`, `pane_report`. Arguments are parsed here, not by
+//! The agent-facing tools (MCP-TOOLS): `pane_list`, `pane_read`, `pane_spawn` (schema only: it waits for the person, so
+//! `server.rs` runs it through `spawn.rs` on the async runtime), `pane_send`, `pane_report`. Arguments are parsed here, not by
 //! rmcp, so a bad argument is a readable `BAD_ARGS` tool error rather than a JSON-RPC error. Every error is
 //! `CODE: explanation. what to do.` and becomes a tool result with `isError: true`.
 
@@ -13,6 +14,8 @@ use serde_json::{Value, json};
 use super::report::Reports;
 use crate::delivery::Engine;
 use crate::panes;
+use crate::policy::PolicyError;
+use crate::spawn::TITLE_MAX_CHARS;
 
 /// `pane_read` line count (MCP-TOOLS): 1–400, default 60.
 const READ_LINES_MAX: u64 = 400;
@@ -79,6 +82,27 @@ pub fn list() -> Vec<Tool> {
             })),
         )
         .with_annotations(read_only()),
+        Tool::new(
+            "pane_spawn",
+            "Open another coding agent in a new pane beside yours, as your child. The person must approve a card \
+             first: this call waits for that (minutes at most) and returns once the child runs, not when it finishes. \
+             Give a complete task: goal, files it may change, how to verify, and to call pane_report once when done; \
+             its RESULT is then pasted into your terminal, so end your turn instead of polling. There is no way to \
+             pass commands, flags, or environment. Limits apply to live children and to spawns per 10 minutes.",
+            schema(json!({
+                "type": "object",
+                "properties": {
+                    "agent": {"type": "string", "description": "Agent id from the catalogue: \"claude-code\" or \"codex\"."},
+                    "title": {"type": "string", "minLength": 1, "maxLength": TITLE_MAX_CHARS, "description": "<work>: <module>, e.g. \"review: auth\"."},
+                    "task": {"type": "string", "minLength": 1, "description": "The child's first prompt, up to 16384 bytes."},
+                    "cwd": {"type": "string", "description": "Absolute folder inside your own; default: your folder."},
+                    "worktree": {"type": "boolean", "description": "Give the child its own git worktree (.worktrees/<id> on branch agent/<id>) so its edits stay off your tree. Needs a git repository."}
+                },
+                "required": ["agent", "title", "task"],
+                "additionalProperties": false
+            })),
+        )
+        .with_annotations(sends()),
         Tool::new(
             "pane_send",
             "Send one prompt to another agent: your child, your parent (to: \"parent\"), or a peer when the person \
@@ -165,8 +189,10 @@ pub fn call(
             let (id, state) = reports.send(engine, caller, args(raw)?)?;
             Ok(json!({"message": id, "state": state}).to_string())
         }
+        // Served by `spawn.rs`; only a server started without a spawner (tests) gets here.
+        "pane_spawn" => Err(PolicyError::SpawnOff.to_string()),
         _ => Err(format!(
-            "BAD_ARGS: no tool named {name:?}. Use pane_list, pane_read, pane_send or pane_report."
+            "BAD_ARGS: no tool named {name:?}. Use pane_list, pane_read, pane_spawn, pane_send or pane_report."
         )),
     }
 }
@@ -241,7 +267,13 @@ mod tests {
         let names: Vec<&str> = tools.iter().map(|t| t.name.as_ref()).collect();
         assert_eq!(
             names,
-            ["pane_list", "pane_read", "pane_send", "pane_report"]
+            [
+                "pane_list",
+                "pane_read",
+                "pane_spawn",
+                "pane_send",
+                "pane_report"
+            ]
         );
         for t in &tools[..2] {
             assert_eq!(t.annotations.as_ref().unwrap().read_only_hint, Some(true));

@@ -538,11 +538,8 @@ impl Engine {
                 if !written {
                     changed.extend(panes::lock(&self.panes).undeliverable(&id));
                 }
-                if paused_now && let Some(store) = &self.store {
-                    let audit = Audit::LoopPaused { count: guard.count };
-                    if let Err(e) = store.log_audit(SystemTime::now(), &guard.workspace, &audit) {
-                        eprintln!("agentdeck: audit log not written: {e}");
-                    }
+                if paused_now {
+                    self.audit(&guard.workspace, &Audit::LoopPaused { count: guard.count });
                 }
                 self.publish(changed, Some(guard));
                 if written {
@@ -551,6 +548,15 @@ impl Engine {
                     Tick::Progress
                 }
             }
+        }
+    }
+
+    /// One audit line (ARCHITECTURE §8); a failed write is reported on stderr, never to the agent.
+    pub fn audit(&self, workspace: &str, event: &Audit) {
+        if let Some(store) = &self.store
+            && let Err(e) = store.log_audit(SystemTime::now(), workspace, event)
+        {
+            eprintln!("agentdeck: audit log not written: {e}");
         }
     }
 
