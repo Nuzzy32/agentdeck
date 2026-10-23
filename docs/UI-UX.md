@@ -168,9 +168,11 @@ Navigasi kiri per bagian; `Esc` menutup; fokus kembali ke pane sebelumnya.
 Perubahan tersimpan langsung; tidak ada tombol Simpan.
 
 ### 4.7 Keadaan awal (tanpa workspace)
-Di tengah jendela: judul "Mulai kerja", tiga tombol besar **Shell**, **Claude Code**, **Codex** dengan status terpasang,
-dua baris penjelasan ("Buka beberapa agen berdampingan. Agen bisa saling memberi tugas setelah kamu mengizinkannya di
-Settings."), dan tautan ke Settings › Kolaborasi.
+Peluncur workspace (§4.1) tampil sebagai halaman, bukan modal: judul "Mulai kerja", satu baris penjelasan dengan tautan
+Settings › Kolaborasi, lalu dua kartu. Kiri: folder (bawaan folder terakhir), daftar folder terakhir (nama + path
+terpotong), sakelar worktree/bypass, tugas awal. Kanan: stepper jumlah per program dan **Susunan**, pratinjau grid pane
+dengan baris yang sama seperti `gridTree`. Tombol utama "Buka N terminal" (tanpa Batal). Di bawah 900 px kartu
+bertumpuk. Peluncur workspace `⌘T` memakai tata letak dua kolom yang sama di dalam modal 760 px.
 
 ### 4.8 Palet prompt dan preset sesi (`⌘P`, D-032)
 Modal 520 px, dibuka `⌘P` atau baris **Prompt** di kaki sidebar. Kolom cari menyaring dua daftar sekaligus.

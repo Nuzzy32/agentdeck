@@ -26,7 +26,6 @@ import { PaneView } from "./layout/Pane";
 import { hydrate, type Layout, snapshot } from "./layout/persist";
 import {
   CloseDialog,
-  EmptyState,
   LoopRibbon,
   MessagesPanel,
   PeerDialog,
@@ -39,7 +38,7 @@ import {
 } from "./layout/Shell";
 import { SplitView } from "./layout/SplitView";
 import { canSplit, type Dir, leaves, neighbor, type Rect, rects, remove, setRatio, type Side, split } from "./layout/tree";
-import { Launcher, SHELL } from "./launcher/Launcher";
+import { basename, Launcher, SHELL } from "./launcher/Launcher";
 import { serial } from "./pane/io";
 import { measureCell } from "./pane/TerminalPane";
 import { Palette } from "./prompts/Palette";
@@ -59,10 +58,6 @@ function useWindowWidth(): number {
 }
 
 const TOAST_MS = 4000;
-
-function basename(path: string): string {
-  return path.split("/").filter(Boolean).pop() ?? "/";
-}
 
 /** Where the launcher's pane goes: a new workspace, or a split of `target` in workspace `ws`. */
 type LauncherTarget = { kind: "workspace" } | { kind: "split"; dir: Dir; target: string; ws: number };
@@ -804,7 +799,21 @@ function App() {
                 />
               </>
             ) : (
-              <EmptyState agents={agents} onStart={newWorkspace} onSettings={() => setSettingsAt("collab")} />
+              launcher ? null : (
+              <Launcher
+                inline
+                title="Mulai kerja"
+                agents={agents}
+                initial={choice}
+                folder={recents[0] ?? home ?? ""}
+                recents={recents}
+                home={home}
+                onLaunch={async () => null}
+                onLaunchMany={launchMany}
+                onClose={() => undefined}
+                onSettings={() => setSettingsAt("collab")}
+              />
+              )
             )}
           </main>
           {activeView && wsKey !== null && messagesOpen ? (

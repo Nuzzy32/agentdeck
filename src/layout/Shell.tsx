@@ -1,10 +1,9 @@
 import { type Ref, useEffect, useId, useRef } from "react";
 import type { LoopGuard } from "../core/messages";
-import { agentIcon, SHELL } from "../launcher/Launcher";
 import { Icon, IconButton } from "./Icon";
 import { nearLimit } from "./logic";
 import { MessagesPanel as MessagesList, type PanelMessage } from "../messages/MessagesPanel";
-import type { AgentInfo, Pane } from "./model";
+import type { Pane } from "./model";
 import { StatusDot } from "./Pane";
 
 /** What the chrome shows of a workspace: its folder for display (`~/…`) and its panes in layout order. */
@@ -277,56 +276,6 @@ export function StatusBar({
         Pesan antar agen {guard.count}/{guard.limit}
       </button>
     </footer>
-  );
-}
-
-/** UI-UX §4.7. Each choice opens the launcher with that program selected; agents not yet checked show as such. */
-export function EmptyState({
-  agents,
-  onStart,
-  onSettings,
-}: {
-  agents: AgentInfo[] | null;
-  onStart: (choice: string) => void;
-  /** Opens Settings › Kolaborasi. */
-  onSettings: () => void;
-}) {
-  const choices = [
-    { id: SHELL, name: "Shell", installed: true as boolean | null },
-    ...(agents ?? [
-      { id: "claude-code", name: "Claude Code", installed: null },
-      { id: "codex", name: "Codex", installed: null },
-    ]),
-  ];
-  return (
-    <div className="empty">
-      <h1 className="empty-title">Mulai kerja</h1>
-      <div className="empty-choices">
-        {choices.map((agent) => (
-          <button
-            key={agent.id}
-            type="button"
-            className="empty-choice"
-            disabled={agent.installed === false}
-            onClick={() => onStart(agent.id)}
-          >
-            <Icon name={agentIcon(agent.id)} size={20} />
-            <span className="empty-choice-name">{agent.name}</span>
-            <span className={agent.installed ? "ok" : "faint"}>
-              {agent.installed === null ? "Memeriksa…" : agent.installed ? "Terpasang" : "Belum terpasang"}
-            </span>
-          </button>
-        ))}
-      </div>
-      <p className="empty-text">
-        Buka beberapa agen berdampingan.
-        <br />
-        Agen bisa saling memberi tugas setelah kamu mengizinkannya di Settings.
-      </p>
-      <button type="button" className="link-btn" onClick={onSettings}>
-        Settings › Kolaborasi
-      </button>
-    </div>
   );
 }
 

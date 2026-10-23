@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { MANY_MAX } from "../prompts/prompts";
-import { bump, Launcher, SHORTCUTS } from "./Launcher";
+import { bump, Launcher, previewRows, SHORTCUTS } from "./Launcher";
 
 const agents = [
   { id: "claude-code", name: "Claude Code", installed: true, version: "2.1.309", install: "" },
@@ -53,5 +53,32 @@ describe("workspace launcher counts (D-034)", () => {
     const out = view(false);
     expect(out).toContain('name="program"');
     expect(out).not.toContain("Lewati izin");
+  });
+
+  it("previews the same rows gridTree builds", () => {
+    expect(previewRows([])).toEqual([[]]);
+    expect(previewRows(["a", "b", "c"])).toEqual([["a", "b", "c"]]);
+    expect(previewRows(["a", "b", "c", "d", "e"])).toEqual([["a", "b", "c"], ["d", "e"]]);
+  });
+
+  it("the start screen is a page, not a modal, without Batal", () => {
+    const out = renderToStaticMarkup(
+      <Launcher
+        inline
+        title="Mulai kerja"
+        agents={agents}
+        initial="claude-code"
+        folder="/Users/u/app"
+        recents={["/Users/u/dev/api"]}
+        home="/Users/u"
+        onLaunch={none}
+        onLaunchMany={none}
+        onClose={() => undefined}
+      />,
+    );
+    expect(out).not.toContain("<dialog");
+    expect(out).not.toContain("Batal");
+    expect(out).toContain("Buka 1 terminal");
+    expect(out).toContain("~/dev/api");
   });
 });

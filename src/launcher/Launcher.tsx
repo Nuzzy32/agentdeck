@@ -6,6 +6,13 @@ import { InstallHint } from "../layout/Pane";
 import { BypassDialog } from "../layout/Shell";
 import { type Counts, expand, MANY_MAX } from "../prompts/prompts";
 
+/** Pane preview for the workspace launcher: the same rows `gridTree` builds (≤ 3 in one row, else two). */
+export function previewRows(ids: readonly string[]): string[][] {
+  if (ids.length <= 3) return [ids.slice()];
+  const top = Math.ceil(ids.length / 2);
+  return [ids.slice(0, top), ids.slice(top)];
+}
+
 /** Launcher choice id for a plain shell; the others are catalogue ids. */
 export const SHELL = "shell";
 
@@ -49,6 +56,8 @@ export function Launcher({
   onLaunch,
   onLaunchMany,
   onClose,
+  inline = false,
+  onSettings,
 }: {
   title: string;
   /** null while `agents_list` is still running. */
@@ -63,6 +72,10 @@ export function Launcher({
   /** Workspace launcher only (D-034): several panes at once, with the worktree and bypass switches. */
   onLaunchMany?: (programs: string[], cwd: string, opts: Many) => Promise<LaunchError | null>;
   onClose: () => void;
+  /** Start screen (UI-UX §4.7): the workspace launcher as a page instead of a modal. */
+  inline?: boolean;
+  /** Inline only: opens Settings › Kolaborasi. */
+  onSettings?: () => void;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   const [choice, setChoice] = useState(initial);
@@ -80,6 +93,7 @@ export function Launcher({
   useEffect(() => {
     const dlg = ref.current;
     if (!dlg) return;
+    if (inline) return;
     dlg.showModal();
     dlg.querySelector<HTMLElement>("input[name=program]:checked, .launcher-count button")?.focus();
     return () => dlg.close();
@@ -126,192 +140,274 @@ export function Launcher({
   const installed = (id: string) => programs.some((p) => p.id === id && p.installed);
   const shortcuts = SHORTCUTS.filter((s) => Object.keys(s.counts).every(installed));
 
+  const order = expand(counts, programs.map((p) => p.id));
+  const nameOf = (id: string) => programs.find((p) => p.id === id)?.name ?? id;
+
+  const programList = many ? (
+    <fieldset className="launcher-programs">
+      <legend className="launcher-field">Terminal sekaligus</legend>
+      {shortcuts.length > 0 ? (
+        <div className="launcher-chips" role="group" aria-label="Pintasan jumlah terminal">
+          {shortcuts.map((s) => (
+            <button key={s.label} type="button" className="btn btn-small" onClick={() => setCounts(s.counts)}>
+              {s.label}
+            </button>
+          ))}
+        </div>
+      ) : null}
+      {programs.map((p) => (
+        <div key={p.id} className={`launcher-program${p.installed ? "" : " launcher-program-off"}`}>
+          <div className="launcher-program-label launcher-count">
+            <Icon name={agentIcon(p.id)} />
+            <span className="launcher-program-name">{p.name}</span>
+            <span className="faint launcher-program-meta">{p.installed ? (p.version ?? "") : "Belum terpasang"}</span>
+            <button
+              type="button"
+              className="btn btn-small"
+              aria-label={`Kurangi ${p.name}`}
+              disabled={!p.installed || (counts[p.id] ?? 0) === 0}
+              onClick={() => setCounts((c) => bump(c, p.id, -1))}
+            >
+              −
+            </button>
+            <span className="mono launcher-count-n" aria-live="polite" aria-label={`${p.name}: ${counts[p.id] ?? 0}`}>
+              {counts[p.id] ?? 0}
+            </span>
+            <button
+              type="button"
+              className="btn btn-small"
+              aria-label={`Tambah ${p.name}`}
+              disabled={!p.installed || total >= MANY_MAX}
+              onClick={() => setCounts((c) => bump(c, p.id, 1))}
+            >
+              +
+            </button>
+          </div>
+          {p.installed ? null : <InstallHint command={p.install} />}
+        </div>
+      ))}
+      {agents === null ? <p className="faint launcher-note">Memeriksa agen yang terpasang…</p> : null}
+    </fieldset>
+  ) : (
+    <fieldset className="launcher-programs">
+      <legend className="sr-only">Program</legend>
+      {programs.map((p) => (
+        <div key={p.id} className={`launcher-program${p.installed ? "" : " launcher-program-off"}`}>
+          <label className="launcher-program-label">
+            <input
+              type="radio"
+              name="program"
+              value={p.id}
+              checked={choice === p.id}
+              disabled={!p.installed}
+              onChange={() => setChoice(p.id)}
+            />
+            <Icon name={agentIcon(p.id)} />
+            <span className="launcher-program-name">{p.name}</span>
+            <span className="faint launcher-program-meta">{p.installed ? (p.version ?? "") : "Belum terpasang"}</span>
+          </label>
+          {p.installed ? null : <InstallHint command={p.install} />}
+        </div>
+      ))}
+      {agents === null ? <p className="faint launcher-note">Memeriksa agen yang terpasang…</p> : null}
+    </fieldset>
+  );
+
+  const preview = many ? (
+    <div className="launcher-preview-wrap">
+      <span className="launcher-field">Susunan</span>
+      <div className="launcher-preview" aria-hidden="true">
+        {order.length === 0 ? (
+          <span className="faint">Belum ada terminal</span>
+        ) : (
+          previewRows(order).map((r, i) => (
+            <div key={i} className="launcher-preview-row">
+              {r.map((id, j) => (
+                <div key={j} className="launcher-preview-cell" title={nameOf(id)}>
+                  <Icon name={agentIcon(id)} size={14} />
+                </div>
+              ))}
+            </div>
+          ))
+        )}
+      </div>
+      <p className="faint launcher-note">
+        {total} terminal · {agentCount} agen · paling banyak {MANY_MAX}
+      </p>
+    </div>
+  ) : null;
+
+  const folderField = (
+    <>
+      <label className="launcher-field" htmlFor="launcher-folder">
+        Folder
+      </label>
+      <div className="launcher-row">
+        <input
+          id="launcher-folder"
+          className="mono input"
+          value={folder}
+          spellCheck={false}
+          autoComplete="off"
+          onChange={(e) => setFolder(e.target.value)}
+        />
+        <button type="button" className="btn" onClick={() => void pick()}>
+          <Icon name="folder" size={12} />
+          Pilih…
+        </button>
+      </div>
+      {recents.length > 0 ? (
+        <ul className="launcher-recents" aria-label="Folder terakhir">
+          {recents.map((f) => (
+            <li key={f}>
+              <button type="button" className="link-btn mono" onClick={() => setFolder(tildePath(f, home))}>
+                <Icon name="folder" size={12} />
+                <span className="launcher-recent-name">{basename(f)}</span>
+                <span className="faint">{tildePath(f, home)}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </>
+  );
+
+  const toggles = many ? (
+    <div className="launcher-toggles">
+      <label className="launcher-toggle">
+        <input
+          type="checkbox"
+          checked={worktree}
+          disabled={agentCount === 0}
+          onChange={(e) => setWorktree(e.target.checked)}
+        />
+        <span>
+          Worktree baru per terminal agen <span className="faint">(folder harus repo git)</span>
+        </span>
+      </label>
+      <label className="launcher-toggle launcher-toggle-danger">
+        <input
+          type="checkbox"
+          checked={bypass}
+          disabled={agentCount === 0}
+          onChange={(e) => (e.target.checked ? setAskBypass(true) : setBypass(false))}
+        />
+        <span>Lewati izin di semua terminal agen</span>
+      </label>
+    </div>
+  ) : null;
+
+  const taskField = !oneAgent ? null : (
+    <>
+      <label className="launcher-field" htmlFor="launcher-task">
+        Tugas awal <span className="faint">(opsional, ⌘Enter menjalankan)</span>
+      </label>
+      <textarea
+        id="launcher-task"
+        className="mono input"
+        rows={4}
+        value={task}
+        spellCheck={false}
+        onChange={(e) => setTask(e.target.value)}
+      />
+    </>
+  );
+
+  const errorBox = error ? (
+    <div className="launcher-error" role="alert">
+      <span>{error.message}</span>
+      {error.install ? <InstallHint command={error.install} /> : null}
+    </div>
+  ) : null;
+
+  const form = (
+    <form onSubmit={(e) => void submit(e)} onKeyDown={onKey}>
+      {inline ? (
+        <header className="launcher-head">
+          <h1 id="launcher-title" className="launcher-head-title">
+            {title}
+          </h1>
+          <p className="launcher-head-text">
+            Buka beberapa agen berdampingan. Agen bisa saling memberi tugas setelah kamu mengizinkannya di{" "}
+            <button type="button" className="link-btn" onClick={onSettings}>
+              Settings › Kolaborasi
+            </button>
+            .
+          </p>
+        </header>
+      ) : (
+        <p id="launcher-title" className="dialog-title">
+          {title}
+        </p>
+      )}
+      {many ? (
+        <div className="launcher-cols">
+          <section className="launcher-col">
+            {folderField}
+            {toggles}
+            {taskField}
+          </section>
+          <section className="launcher-col">
+            {programList}
+            {preview}
+          </section>
+        </div>
+      ) : (
+        <>
+          {programList}
+          {folderField}
+          {taskField}
+        </>
+      )}
+      {errorBox}
+      <div className="dialog-actions">
+        {inline ? null : (
+          <button type="button" className="btn" onClick={onClose}>
+            Batal
+          </button>
+        )}
+        <button type="submit" className="btn btn-primary" disabled={busy || (many && total === 0)}>
+          {many ? `Buka ${total} terminal` : "Jalankan"}
+        </button>
+      </div>
+    </form>
+  );
+
+  const bypassAsk = askBypass ? (
+    <BypassDialog
+      onConfirm={() => {
+        setBypass(true);
+        setAskBypass(false);
+      }}
+      onCancel={() => setAskBypass(false)}
+    />
+  ) : null;
+
+  if (inline) {
+    return (
+      <div className="launcher launcher-inline" aria-labelledby="launcher-title" role="region">
+        {form}
+        {bypassAsk}
+      </div>
+    );
+  }
+
   return (
     <dialog
       ref={ref}
-      className="dialog launcher"
+      className={`dialog launcher${many ? " launcher-wide" : ""}`}
       aria-labelledby="launcher-title"
       onCancel={(e) => {
         e.preventDefault();
         onClose();
       }}
     >
-      <form onSubmit={(e) => void submit(e)} onKeyDown={onKey}>
-        <p id="launcher-title" className="dialog-title">
-          {title}
-        </p>
-        {many ? (
-          <fieldset className="launcher-programs">
-            <legend className="launcher-field">Terminal sekaligus</legend>
-            {shortcuts.length > 0 ? (
-              <div className="launcher-chips" role="group" aria-label="Pintasan jumlah terminal">
-                {shortcuts.map((s) => (
-                  <button key={s.label} type="button" className="btn btn-small" onClick={() => setCounts(s.counts)}>
-                    {s.label}
-                  </button>
-                ))}
-              </div>
-            ) : null}
-            {programs.map((p) => (
-              <div key={p.id} className={`launcher-program${p.installed ? "" : " launcher-program-off"}`}>
-                <div className="launcher-program-label launcher-count">
-                  <Icon name={agentIcon(p.id)} />
-                  <span className="launcher-program-name">{p.name}</span>
-                  <span className="faint launcher-program-meta">
-                    {p.installed ? (p.version ?? "") : "Belum terpasang"}
-                  </span>
-                  <button
-                    type="button"
-                    className="btn btn-small"
-                    aria-label={`Kurangi ${p.name}`}
-                    disabled={!p.installed || (counts[p.id] ?? 0) === 0}
-                    onClick={() => setCounts((c) => bump(c, p.id, -1))}
-                  >
-                    −
-                  </button>
-                  <span className="mono launcher-count-n" aria-live="polite" aria-label={`${p.name}: ${counts[p.id] ?? 0}`}>
-                    {counts[p.id] ?? 0}
-                  </span>
-                  <button
-                    type="button"
-                    className="btn btn-small"
-                    aria-label={`Tambah ${p.name}`}
-                    disabled={!p.installed || total >= MANY_MAX}
-                    onClick={() => setCounts((c) => bump(c, p.id, 1))}
-                  >
-                    +
-                  </button>
-                </div>
-                {p.installed ? null : <InstallHint command={p.install} />}
-              </div>
-            ))}
-            {agents === null ? <p className="faint launcher-note">Memeriksa agen yang terpasang…</p> : null}
-            <p className="faint launcher-note">
-              {total} terminal, paling banyak {MANY_MAX}.
-            </p>
-          </fieldset>
-        ) : (
-        <fieldset className="launcher-programs">
-            <legend className="sr-only">Program</legend>
-            {programs.map((p) => (
-              <div key={p.id} className={`launcher-program${p.installed ? "" : " launcher-program-off"}`}>
-                <label className="launcher-program-label">
-                  <input
-                    type="radio"
-                    name="program"
-                    value={p.id}
-                    checked={choice === p.id}
-                    disabled={!p.installed}
-                    onChange={() => setChoice(p.id)}
-                  />
-                  <Icon name={agentIcon(p.id)} />
-                  <span className="launcher-program-name">{p.name}</span>
-                  <span className="faint launcher-program-meta">
-                    {p.installed ? (p.version ?? "") : "Belum terpasang"}
-                  </span>
-                </label>
-                {p.installed ? null : <InstallHint command={p.install} />}
-              </div>
-            ))}
-            {agents === null ? <p className="faint launcher-note">Memeriksa agen yang terpasang…</p> : null}
-          </fieldset>
-        )}
-
-        <label className="launcher-field" htmlFor="launcher-folder">
-          Folder
-        </label>
-        <div className="launcher-row">
-          <input
-            id="launcher-folder"
-            className="mono input"
-            value={folder}
-            spellCheck={false}
-            autoComplete="off"
-            onChange={(e) => setFolder(e.target.value)}
-          />
-          <button type="button" className="btn" onClick={() => void pick()}>
-            <Icon name="folder" size={12} />
-            Pilih…
-          </button>
-        </div>
-        {recents.length > 0 ? (
-          <ul className="launcher-recents" aria-label="Folder terakhir">
-            {recents.map((f) => (
-              <li key={f}>
-                <button type="button" className="link-btn mono" onClick={() => setFolder(tildePath(f, home))}>
-                  {tildePath(f, home)}
-                </button>
-              </li>
-            ))}
-          </ul>
-        ) : null}
-
-        {many ? (
-          <div className="launcher-toggles">
-            <label className="launcher-toggle">
-              <input
-                type="checkbox"
-                checked={worktree}
-                disabled={agentCount === 0}
-                onChange={(e) => setWorktree(e.target.checked)}
-              />
-              <span>
-                Worktree baru per terminal agen <span className="faint">(folder harus repo git)</span>
-              </span>
-            </label>
-            <label className="launcher-toggle launcher-toggle-danger">
-              <input
-                type="checkbox"
-                checked={bypass}
-                disabled={agentCount === 0}
-                onChange={(e) => (e.target.checked ? setAskBypass(true) : setBypass(false))}
-              />
-              <span>Lewati izin di semua terminal agen</span>
-            </label>
-          </div>
-        ) : null}
-
-        {!oneAgent ? null : (
-          <>
-            <label className="launcher-field" htmlFor="launcher-task">
-              Tugas awal <span className="faint">(opsional, ⌘Enter menjalankan)</span>
-            </label>
-            <textarea
-              id="launcher-task"
-              className="mono input"
-              rows={4}
-              value={task}
-              spellCheck={false}
-              onChange={(e) => setTask(e.target.value)}
-            />
-          </>
-        )}
-
-        {error ? (
-          <div className="launcher-error" role="alert">
-            <span>{error.message}</span>
-            {error.install ? <InstallHint command={error.install} /> : null}
-          </div>
-        ) : null}
-
-        <div className="dialog-actions">
-          <button type="button" className="btn" onClick={onClose}>
-            Batal
-          </button>
-          <button type="submit" className="btn btn-primary" disabled={busy || (many && total === 0)}>
-            Jalankan
-          </button>
-        </div>
-      </form>
-      {askBypass ? (
-        <BypassDialog
-          onConfirm={() => {
-            setBypass(true);
-            setAskBypass(false);
-          }}
-          onCancel={() => setAskBypass(false)}
-        />
-      ) : null}
+      {form}
+      {bypassAsk}
     </dialog>
   );
+}
+
+export function basename(path: string): string {
+  return path.split("/").filter(Boolean).pop() ?? "/";
 }

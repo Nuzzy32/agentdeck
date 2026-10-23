@@ -36,8 +36,7 @@
 .link-btn,
 .row,
 .status-item,
-.message,
-.empty-choice {
+.message {
   border: 0;
   background: none;
   cursor: pointer;
@@ -536,59 +535,6 @@
   color: var(--warn);
 }
 
-/* Empty state, UI-UX §4.7 */
-.empty {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 16px;
-  flex: 1;
-  padding: 24px;
-  text-align: center;
-}
-.empty-title {
-  margin: 0;
-  font-size: 20px;
-  line-height: 28px;
-  font-weight: 600;
-}
-.empty-choices {
-  display: flex;
-  gap: 12px;
-}
-.empty-choice {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 6px;
-  width: 148px;
-  padding: 16px 12px;
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-card);
-  font-size: var(--text-label-lg);
-}
-.empty-choice:hover:not(:disabled) {
-  border-color: var(--accent);
-}
-.empty-choice:disabled {
-  cursor: default;
-  color: var(--muted);
-}
-.empty-choice-name {
-  color: var(--fg);
-  font-size: var(--text-ui);
-  font-weight: 600;
-}
-.empty-choice:disabled .empty-choice-name {
-  color: var(--muted);
-}
-.empty-text {
-  margin: 0;
-  color: var(--muted);
-}
-
 /* Close dialog, UI-UX §3 */
 .dialog {
   width: 320px;
@@ -798,6 +744,130 @@ textarea.input {
   list-style: none;
   font-size: var(--text-label-lg);
 }
+/* Workspace launcher (D-034): folder on the left, terminals and their layout on the right. */
+.launcher-wide {
+  width: 760px;
+}
+.launcher-cols {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 16px;
+}
+.launcher-col {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+.launcher-recents li {
+  min-width: 0;
+  max-width: 100%;
+}
+.launcher-recents .link-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 2px 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.launcher-recents .link-btn > * {
+  flex: none;
+}
+.launcher-recents .link-btn > .faint {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.launcher-recent-name {
+  color: var(--fg);
+}
+.launcher-cols .launcher-recents {
+  flex-direction: column;
+}
+.launcher-preview-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 4px;
+}
+.launcher-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  height: 120px;
+  padding: 4px;
+  background: var(--term-bg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  place-content: center;
+}
+.launcher-preview > .faint {
+  align-self: center;
+}
+.launcher-preview-row {
+  display: flex;
+  flex: 1;
+  gap: 4px;
+}
+.launcher-preview-cell {
+  display: grid;
+  flex: 1;
+  place-items: center;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-top: 2px solid var(--accent);
+  border-radius: var(--radius);
+  color: var(--muted);
+}
+
+/* Start screen, UI-UX §4.7: the workspace launcher as a page. */
+.launcher-inline {
+  width: auto;
+  max-width: none;
+  flex: 1;
+  overflow: auto;
+  padding: 40px 32px;
+}
+.launcher-inline form {
+  width: min(880px, 100%);
+  margin: 0 auto;
+}
+.launcher-head {
+  margin-bottom: 16px;
+}
+.launcher-head-title {
+  margin: 0;
+  font-size: 20px;
+  line-height: 28px;
+  font-weight: 600;
+}
+.launcher-head-text {
+  margin: 4px 0 0;
+  color: var(--muted);
+}
+.launcher-inline .launcher-col {
+  padding: 12px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+}
+.launcher-inline .launcher-preview {
+  height: 160px;
+}
+.launcher-inline .dialog-actions .btn-primary {
+  height: 32px;
+  padding: 0 20px;
+}
+@media (max-width: 900px) {
+  .launcher-cols {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 .launcher-error {
   display: flex;
   flex-direction: column;
