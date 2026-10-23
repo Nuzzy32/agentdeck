@@ -27,7 +27,7 @@ bypass untuk pane yang dibuka orang) dibuat dan diuji headless dengan CLI asli; 
 - Notifikasi macOS kartu persetujuan (perlu dilihat dan diklik pemilik).
 - 6 pane agen aktif di MacBook Air M1 8 GB tanpa UI tersendat.
 
-**Task tersisa:** ulangi bagian Codex saat server OpenAI lega. Phase 5 pribadi: T5.1 ikon (`src-tauri/icons/source.svg`)
+**Task tersisa:** ulangi bagian Codex saat server OpenAI lega. Phase 5 pribadi: T5.1 ikon (`src-tauri/icons/source.png`, diganti 2026-10-24)
 selesai dan `pnpm tauri build` menghasilkan `.app` + `.dmg` bertanda tangan ad-hoc yang berjalan (MCP aktif, agen
 terdeteksi); T5.2 notarisasi dan T5.3 updater ditunda sampai rilis publik (D-026).
 
