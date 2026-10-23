@@ -377,5 +377,5 @@ ditutup/keluar → `denied`.
   berkas tidak tertimpa kosong. Perubahan dalam 400 ms terakhir sebelum keluar hilang.
 - **Uji di aplikasi (2026-10-23, `pnpm tauri dev`, pane shell):** 2 shell split kanan → keluar → dibuka lagi: workspace,
   split, dan fokus pulih, kedua pane "belum dijalankan"; Jalankan menghidupkan shell di foldernya; pane baru dapat p3;
-  menutup pane pulihan yang belum dijalankan memperbarui berkas. Anak agen dan worktree pulihan hanya teruji lewat tes
-  unit (Claude di pane uji menolak bekerja: "organization has disabled Claude subscription access").
+  menutup pane pulihan yang belum dijalankan memperbarui berkas. Dengan Claude Code 2.1.309: anak `pane_spawn` dengan
+  worktree pulih sebagai "anak p1" dan "belum dijalankan"; menutupnya menghapus worktree `agent/p2` yang bersih.
