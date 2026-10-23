@@ -87,8 +87,9 @@ pub fn env(get: impl Fn(&str) -> Option<OsString>, path: &str) -> Vec<(String, O
     env
 }
 
-/// `$SHELL -l` (ARCHITECTURE §3); shell bukan jalur absolut → `/bin/zsh`.
-pub fn shell(env: Vec<(String, OsString)>) -> Launch {
+/// `$SHELL -l` (ARCHITECTURE §3); shell bukan jalur absolut → `/bin/zsh`. zsh mendapat integrasi OSC 133 lewat
+/// `ZDOTDIR` per peluncuran (D-031); shell lain dan folder integrasi yang tidak bisa dipercaya → shell polos.
+pub fn shell(mut env: Vec<(String, OsString)>) -> Launch {
     let shell = env
         .iter()
         .find(|(k, _)| k == "SHELL")
@@ -96,11 +97,41 @@ pub fn shell(env: Vec<(String, OsString)>) -> Launch {
         .filter(|s| s.starts_with('/'))
         .unwrap_or("/bin/zsh")
         .to_owned();
+    if Path::new(&shell).file_name() == Some("zsh".as_ref())
+        && let Some(dir) = zsh_integration(&std::env::temp_dir())
+    {
+        env.push(("ZDOTDIR".into(), dir.into()));
+    }
     Launch {
         argv: vec![shell, "-l".into()],
         env,
         osc_status: false,
     }
+}
+
+/// `.zshenv` integrasi: menghapus `ZDOTDIR`, membaca `~/.zshenv` pengguna, lalu memasang hook OSC 133.
+const ZSHENV: &str = include_str!("../shell/zsh/.zshenv");
+
+/// `<tmp>/agentdeck-zsh-<uid>/.zshenv`, ditulis ulang tiap peluncuran (tulis lalu rename, jadi zsh yang sedang mulai
+/// tidak membaca setengah berkas). Zsh men-source berkas ini, jadi folder harus milik kita dan tertutup
+/// (0700, bukan symlink): tanpa `TMPDIR` folder ada di `/tmp` yang bisa ditulis pengguna lain.
+fn zsh_integration(tmp: &Path) -> Option<std::path::PathBuf> {
+    use std::os::unix::fs::{DirBuilderExt, MetadataExt, PermissionsExt};
+    // SAFETY: getuid tidak pernah gagal dan tidak menyentuh memori.
+    let uid = unsafe { libc::getuid() };
+    let dir = tmp.join(format!("agentdeck-zsh-{uid}"));
+    let _ = std::fs::DirBuilder::new().mode(0o700).create(&dir);
+    let meta = std::fs::symlink_metadata(&dir).ok()?;
+    if !meta.is_dir() || meta.uid() != uid || meta.permissions().mode() & 0o077 != 0 {
+        return None;
+    }
+    // Satu nama sementara per panggilan: pane yang dipulihkan bisa mulai bersamaan dari beberapa thread.
+    static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let part = dir.join(format!(".zshenv.{}.{seq}", std::process::id()));
+    std::fs::write(&part, ZSHENV).ok()?;
+    std::fs::rename(&part, dir.join(".zshenv")).ok()?;
+    Some(dir)
 }
 
 /// Agen dari katalog: path manual bila diisi, selain itu biner dicari di `PATH` env itu sendiri; tugas setelah `--`
@@ -410,5 +441,90 @@ mod tests {
         assert_eq!(l.argv, ["/bin/zsh", "-l"]);
         assert!(!l.osc_status);
         assert_eq!(shell(vec![]).argv, ["/bin/zsh", "-l"]);
+    }
+
+    /// zsh gets `ZDOTDIR` pointing at the integration `.zshenv`; other shells run untouched.
+    #[test]
+    fn only_zsh_gets_osc133_integration() {
+        let l = shell(env(polluted, "/bin"));
+        let dir = value(&l.env, "ZDOTDIR").expect("ZDOTDIR for zsh");
+        assert_eq!(
+            std::fs::read_to_string(Path::new(dir).join(".zshenv")).unwrap(),
+            ZSHENV
+        );
+        let bash = shell(vec![("SHELL".into(), "/bin/bash".into())]);
+        assert_eq!(bash.argv, ["/bin/bash", "-l"]);
+        assert_eq!(value(&bash.env, "ZDOTDIR"), None);
+    }
+
+    /// The integration dir is sourced by zsh, so one that others can write to, or a symlink, is refused.
+    #[test]
+    fn untrusted_integration_dir_is_refused() {
+        let tmp = std::env::temp_dir().join(format!("agentdeck-zdot-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+        let dir = zsh_integration(&tmp).unwrap();
+        assert_eq!(
+            std::fs::metadata(&dir).unwrap().permissions().mode() & 0o777,
+            0o700
+        );
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o777)).unwrap();
+        assert_eq!(zsh_integration(&tmp), None);
+        std::fs::remove_dir_all(&dir).unwrap();
+        let elsewhere = tmp.join("elsewhere");
+        std::fs::create_dir(&elsewhere).unwrap();
+        std::os::unix::fs::symlink(&elsewhere, &dir).unwrap();
+        assert_eq!(zsh_integration(&tmp), None);
+        assert!(!elsewhere.join(".zshenv").exists());
+        std::fs::remove_dir_all(&tmp).unwrap();
+    }
+
+    /// Real zsh with a fake `$HOME`: the user's `.zshenv` and `.zshrc` still load, `ZDOTDIR` is gone, and the hooks
+    /// emit OSC 133 with the exit code even after a user precmd that returns non-zero.
+    #[test]
+    fn zsh_integration_emits_osc133_and_keeps_user_dotfiles() {
+        let tmp = std::env::temp_dir().join(format!("agentdeck-zrun-{}", std::process::id()));
+        let home = tmp.join("home");
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::write(home.join(".zshenv"), "export FROM_ENV=1\n").unwrap();
+        std::fs::write(
+            home.join(".zshrc"),
+            "export FROM_RC=1\nfirst() { return 7 }\nprecmd_functions=(first $precmd_functions)\nPS1='%% '\n",
+        )
+        .unwrap();
+        let dir = zsh_integration(&tmp).unwrap();
+        // The prompt (and the B mark in it) goes to stderr, so merge it into the captured stdout.
+        let mut child = std::process::Command::new("/bin/sh")
+            .args(["-c", "exec /bin/zsh -l -i 2>&1"])
+            .env_clear()
+            .env("HOME", &home)
+            .env("ZDOTDIR", &dir)
+            .env("TERM", "xterm-256color")
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        use std::io::Write;
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(b"false\nprint -r -- \"Z=${ZDOTDIR-unset} E=$FROM_ENV R=$FROM_RC\"\n\n")
+            .unwrap();
+        let out = String::from_utf8(child.wait_with_output().unwrap().stdout).unwrap();
+        assert!(out.contains("Z=unset E=1 R=1"), "{out:?}");
+        let marks: Vec<&str> = out
+            .split("\x1b]133;")
+            .skip(1)
+            .map(|s| s.split('\x07').next().unwrap())
+            .collect();
+        // `false`, then `print`, then an empty line: no D for a prompt where nothing ran.
+        assert_eq!(
+            marks,
+            [
+                "A", "B", "C", "D;1", "A", "B", "C", "D;0", "A", "B", "A", "B"
+            ]
+        );
+        std::fs::remove_dir_all(&tmp).unwrap();
     }
 }

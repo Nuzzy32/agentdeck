@@ -3,9 +3,11 @@ import { Channel, invoke } from "@tauri-apps/api/core";
 import { FitAddon } from "@xterm/addon-fit";
 import { SearchAddon } from "@xterm/addon-search";
 import { WebglAddon } from "@xterm/addon-webgl";
-import { Terminal } from "@xterm/xterm";
+import { type IMarker, Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import { TerminalContext, xtermTheme } from "../settings/settings";
+import { parse133, step, tracker } from "./commands";
+import "./commands.css";
 import { FindBar } from "./FindBar";
 import { activity, cumulativeAcker, inputClock, serial, writeQueue } from "./io";
 
@@ -106,6 +108,50 @@ export function TerminalPane({
       if (live) t.write(`\r\n[agentdeck] ${String(e)}\r\n`);
     });
 
+    // Command blocks (D-031). Only the zsh integration of a shell pane sends OSC 133, so agent panes get no marks.
+    const commands = new Set<IMarker>();
+    const feed = tracker<IMarker>({
+      mark: () => t.registerMarker(0),
+      drop: (m) => m.dispose(),
+      start: (m) => {
+        commands.add(m);
+        m.onDispose(() => commands.delete(m));
+      },
+      finish: (m, exit) => {
+        const state = exit === 0 ? "cmd-ok" : exit === null ? "cmd-unknown" : "cmd-fail";
+        t.registerDecoration({ marker: m, width: 1 })?.onRender((d) => {
+          d.classList.add("cmd-mark", state);
+          d.title = exit === null ? "Kode exit tidak diketahui" : `Kode exit ${exit}`;
+        });
+      },
+    });
+    const osc = t.parser.registerOscHandler(133, (data) => {
+      const mark = parse133(data);
+      if (mark) feed(mark);
+      return true;
+    });
+    // ⌘↑/⌘↓ jump to the previous/next command (xterm.js does nothing with them). From the bottom the reference is the
+    // cursor; after a jump that could not scroll (target already in the last screen) it is the line jumped to.
+    let last: { line: number; viewportY: number } | null = null;
+    t.attachCustomKeyEventHandler((e) => {
+      if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return true;
+      if (!e.metaKey || e.altKey || e.ctrlKey || e.shiftKey) return true;
+      if (e.type !== "keydown") return false;
+      const buf = t.buffer.active;
+      if (buf.type !== "normal") return false;
+      const atBottom = buf.viewportY === buf.baseY;
+      const from = last?.viewportY === buf.viewportY ? last.line : atBottom ? buf.baseY + buf.cursorY : buf.viewportY;
+      const line = step([...commands].map((m) => m.line), from, e.key === "ArrowUp" ? -1 : 1);
+      if (line === undefined) {
+        if (e.key === "ArrowDown") t.scrollToBottom();
+        last = null;
+        return false;
+      }
+      t.scrollToLine(line);
+      last = { line, viewportY: buf.viewportY };
+      return false;
+    });
+
     const clock = inputClock();
     for (const ev of INPUT_EVENTS) el.addEventListener(ev, clock.mark, true);
     const write = writeQueue((data, typed) => invoke("pane_write", { id, data, typed }));
@@ -125,6 +171,7 @@ export function TerminalPane({
     return () => {
       live = false;
       busy.dispose();
+      osc.dispose();
       scheme.removeEventListener("change", onScheme);
       ro.disconnect();
       onResize.dispose();

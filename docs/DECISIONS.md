@@ -471,3 +471,26 @@ halaman merek OpenAI menjawab 403 (hanya terbaca lewat cuplikan pencarian, belum
 - Uji di aplikasi setelah perbaikan: p1 diberi kata kode, ⌘Q → `layout.json` menyimpan sesi p1; buka lagi, Jalankan
   p1 → proses berjalan dengan `--resume`, riwayat lama tampil, Claude menjawab kata kodenya. Tombol pane pulihan belum
   memberi tahu bahwa percakapan dilanjutkan.
+
+## D-031 — Blok perintah OSC 133 di pane shell (2026-10-23)
+- Ide dari BridgeMind (RESEARCH §3): blok perintah ala Warp. Hanya pane shell zsh; pane agen tidak berubah.
+- Integrasi per peluncuran (sejalan D-005, tidak ada dotfile/config global yang ditulis): `launch::shell` menulis
+  `src-tauri/shell/zsh/.zshenv` (di-embed) ke `$TMPDIR/agentdeck-zsh-<uid>/.zshenv` lalu mengisi env `ZDOTDIR`. Berkas
+  itu menghapus `ZDOTDIR`, men-source `~/.zshenv` pengguna, sehingga `.zprofile`/`.zshrc`/`.zlogin` dibaca dari
+  tempat biasanya (juga `ZDOTDIR` milik pengguna yang diset di `.zshenv`-nya). Pola sama dengan Ghostty/kitty.
+- Hook (`add-zsh-hook`, dipasang sebelum `.zshrc`): `precmd` → `D;<exit>` (hanya bila ada perintah yang jalan), `A`,
+  dan `B` di akhir `PS1`; `preexec` → `C`. `$?` tetap benar walau precmd pengguna lain jalan lebih dulu (dites).
+- Keamanan: zsh men-source berkas itu, jadi folder dibuat 0700 dan ditolak bila bukan milik uid kita, bukan folder
+  biasa (symlink), atau bisa ditulis grup/lainnya. Tanpa `TMPDIR` folder ada di `/tmp`. Ditolak → shell polos tanpa
+  integrasi. Berkas ditulis ulang tiap peluncuran lewat tulis-lalu-rename.
+- UI (`src/pane/commands.ts`, `TerminalPane.tsx`): `registerOscHandler(133)`; marker di baris A, prompt tanpa perintah
+  dibuang. Saat D, dekorasi batang 3 px di padding kiri `.xterm` (8 px yang sudah ada, jadi lebar kolom tidak berubah):
+  `--ok` bila exit 0, `--danger` bila gagal, `--muted` bila kode tidak dikirim; tooltip `Kode exit N`.
+- Pintasan: **⌘↑ / ⌘↓** perintah sebelumnya/berikutnya (sama dengan Terminal.app). Tidak bentrok dengan
+  `src/layout/keys.ts`: ⌘⌥+panah fokus pane, ⌘ tanpa ⌥ + panah tidak dipetakan, dan xterm.js mengabaikan ⌘+panah.
+  Dipasang di `TerminalPane.tsx` (`attachCustomKeyEventHandler`), bukan `keys.ts`; tanpa marker tidak terjadi apa-apa,
+  sama seperti sebelumnya. Usulan: pindahkan ke `keys.ts` + UI-UX §7 saat berkas itu bebas disentuh.
+- Batasan: bash/fish tanpa integrasi. `.zshrc` yang menimpa `precmd_functions`/`preexec_functions` utuh (bukan
+  menambah) mematikan hook; tema yang menyusun ulang `PS1` di precmd-nya sendiri menghapus `B` (tidak dipakai UI).
+  Prompt instan p10k tercetak sebelum precmd pertama, jadi prompt pertama tanpa A. Perintah di dalam `ssh`/`tmux`
+  tidak ditandai. Penanda ikut hilang bersama scrollback.
