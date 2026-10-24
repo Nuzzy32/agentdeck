@@ -114,6 +114,7 @@ pub fn shell(mut env: Vec<(String, OsString)>) -> Launch {
 }
 
 /// `.zshenv` integrasi: menghapus `ZDOTDIR`, membaca `~/.zshenv` pengguna, lalu memasang hook OSC 133.
+#[cfg(unix)]
 const ZSHENV: &str = include_str!("../shell/zsh/.zshenv");
 
 /// `<tmp>/agentdeck-zsh-<uid>/.zshenv`, ditulis ulang tiap peluncuran (tulis lalu rename, jadi zsh yang sedang mulai
