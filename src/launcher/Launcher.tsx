@@ -1,6 +1,6 @@
 import { type FormEvent, type KeyboardEvent, useEffect, useRef, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
-import { Icon, type IconName } from "../layout/Icon";
+import { AgentMark, Icon } from "../layout/Icon";
 import { type AgentInfo, expandHome, type LaunchError, tildePath } from "../layout/model";
 import { InstallHint } from "../layout/Pane";
 import { BypassDialog } from "../layout/Shell";
@@ -15,12 +15,6 @@ export function previewRows(ids: readonly string[]): string[][] {
 
 /** Launcher choice id for a plain shell; the others are catalogue ids. */
 export const SHELL = "shell";
-
-const ICON: Record<string, IconName> = { [SHELL]: "terminal", "claude-code": "sparkles", codex: "bot" };
-
-export function agentIcon(id: string): IconName {
-  return ICON[id] ?? "terminal";
-}
 
 /** Launcher shortcuts (D-034): common Claude/Codex mixes, shown when those agents are installed. */
 export const SHORTCUTS: readonly { label: string; counts: Counts }[] = [
@@ -158,30 +152,30 @@ export function Launcher({
       {programs.map((p) => (
         <div key={p.id} className={`launcher-program${p.installed ? "" : " launcher-program-off"}`}>
           <div className="launcher-program-label launcher-count">
-            <Icon name={agentIcon(p.id)} />
+            <AgentMark id={p.id} size={20} />
             <span className="launcher-program-name">{p.name}</span>
             <span className="faint launcher-program-meta">{p.installed ? (p.version ?? "") : "Belum terpasang"}</span>
-            <button
-              type="button"
-              className="btn btn-small"
-              aria-label={`Kurangi ${p.name}`}
-              disabled={!p.installed || (counts[p.id] ?? 0) === 0}
-              onClick={() => setCounts((c) => bump(c, p.id, -1))}
-            >
-              −
-            </button>
-            <span className="mono launcher-count-n" aria-live="polite" aria-label={`${p.name}: ${counts[p.id] ?? 0}`}>
-              {counts[p.id] ?? 0}
+            <span className="stepper">
+              <button
+                type="button"
+                aria-label={`Kurangi ${p.name}`}
+                disabled={!p.installed || (counts[p.id] ?? 0) === 0}
+                onClick={() => setCounts((c) => bump(c, p.id, -1))}
+              >
+                −
+              </button>
+              <span className="mono stepper-n" aria-live="polite" aria-label={`${p.name}: ${counts[p.id] ?? 0}`}>
+                {counts[p.id] ?? 0}
+              </span>
+              <button
+                type="button"
+                aria-label={`Tambah ${p.name}`}
+                disabled={!p.installed || total >= MANY_MAX}
+                onClick={() => setCounts((c) => bump(c, p.id, 1))}
+              >
+                +
+              </button>
             </span>
-            <button
-              type="button"
-              className="btn btn-small"
-              aria-label={`Tambah ${p.name}`}
-              disabled={!p.installed || total >= MANY_MAX}
-              onClick={() => setCounts((c) => bump(c, p.id, 1))}
-            >
-              +
-            </button>
           </div>
           {p.installed ? null : <InstallHint command={p.install} />}
         </div>
@@ -202,7 +196,7 @@ export function Launcher({
               disabled={!p.installed}
               onChange={() => setChoice(p.id)}
             />
-            <Icon name={agentIcon(p.id)} />
+            <AgentMark id={p.id} size={20} />
             <span className="launcher-program-name">{p.name}</span>
             <span className="faint launcher-program-meta">{p.installed ? (p.version ?? "") : "Belum terpasang"}</span>
           </label>
@@ -224,7 +218,7 @@ export function Launcher({
             <div key={i} className="launcher-preview-row">
               {r.map((id, j) => (
                 <div key={j} className="launcher-preview-cell" title={nameOf(id)}>
-                  <Icon name={agentIcon(id)} size={14} />
+                  <AgentMark id={id} size={24} />
                 </div>
               ))}
             </div>
@@ -277,6 +271,8 @@ export function Launcher({
       <label className="launcher-toggle">
         <input
           type="checkbox"
+          role="switch"
+          className="switch"
           checked={worktree}
           disabled={agentCount === 0}
           onChange={(e) => setWorktree(e.target.checked)}
@@ -288,6 +284,8 @@ export function Launcher({
       <label className="launcher-toggle launcher-toggle-danger">
         <input
           type="checkbox"
+          role="switch"
+          className="switch switch-danger"
           checked={bypass}
           disabled={agentCount === 0}
           onChange={(e) => (e.target.checked ? setAskBypass(true) : setBypass(false))}

@@ -40,14 +40,15 @@
   border: 0;
   background: none;
   cursor: pointer;
-  border-radius: var(--radius);
+  border-radius: var(--radius-card);
+  transition: background-color var(--dur-out) var(--ease), color var(--dur-out) var(--ease);
 }
 
 .icon-btn {
   display: inline-grid;
   place-items: center;
-  width: 24px;
-  height: 24px;
+  width: 26px;
+  height: 26px;
   padding: 0;
   flex: none;
   color: var(--muted);
@@ -57,8 +58,13 @@
 .row:hover,
 .status-item:hover,
 .message:hover {
-  background: var(--raised);
+  background: var(--hover);
   color: var(--fg);
+}
+.icon-btn:active,
+.row:active,
+.status-item:active {
+  background: var(--pressed);
 }
 .icon-btn[aria-pressed="true"] {
   color: var(--fg);
@@ -100,6 +106,7 @@
 }
 .titlebar-name {
   font-weight: 600;
+  letter-spacing: -0.01em;
 }
 .titlebar-folder {
   color: var(--muted);
@@ -114,7 +121,7 @@
   flex-direction: column;
   width: 200px;
   flex: none;
-  padding: 4px;
+  padding: 6px;
   background: var(--surface);
   border-right: 1px solid var(--line);
   overflow-y: auto;
@@ -125,8 +132,8 @@
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  min-height: 28px;
-  padding: 0 4px 0 8px;
+  min-height: 30px;
+  padding: 0 2px 0 8px;
   color: var(--faint);
   font-size: var(--text-label);
   font-weight: 600;
@@ -148,16 +155,18 @@
 .row {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   width: 100%;
-  min-height: 24px;
-  padding: 3px 8px;
+  min-height: 28px;
+  padding: 4px 8px;
+  color: var(--muted);
   text-align: left;
   white-space: nowrap;
 }
-.row-active {
-  background: var(--raised);
-  box-shadow: inset 2px 0 0 var(--accent);
+.row-active,
+.row-active:hover {
+  background: var(--accent-soft);
+  color: var(--fg);
 }
 .row-workspace {
   flex-direction: column;
@@ -175,7 +184,7 @@
   font-size: var(--text-label);
 }
 .row-child {
-  padding-left: 12px;
+  padding-left: 14px;
 }
 .row-name {
   flex: 1;
@@ -339,7 +348,11 @@
   gap: 6px;
 }
 .pane-agent {
+  color: var(--fg);
   font-weight: 600;
+}
+.pane-id {
+  color: var(--faint);
 }
 
 /* Shortening order (UI-UX §3): folder from the middle, then the title, then the folder disappears. */
@@ -375,9 +388,9 @@
 }
 
 .badge {
-  padding: 0 6px;
+  padding: 0 7px;
   border: 1px solid var(--line);
-  border-radius: var(--radius);
+  border-radius: 999px;
   font-size: var(--text-label);
   line-height: 16px;
 }
@@ -527,9 +540,21 @@
   align-items: center;
   gap: 6px;
   height: 20px;
-  padding: 0 6px;
+  padding: 0 8px;
+  border-radius: var(--radius);
   color: var(--muted);
   font-size: var(--text-label);
+}
+.status-item + .status-item {
+  position: relative;
+}
+.status-item + .status-item::before {
+  content: "";
+  position: absolute;
+  left: -2px;
+  top: 5px;
+  bottom: 5px;
+  border-left: 1px solid var(--line);
 }
 .status-item.warn {
   color: var(--warn);
@@ -537,18 +562,30 @@
 
 /* Close dialog, UI-UX §3 */
 .dialog {
-  width: 320px;
-  padding: 12px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-card);
+  width: 340px;
+  padding: 16px;
+  border: 0;
+  border-radius: var(--radius-modal);
   background: var(--raised);
   color: var(--fg);
+  box-shadow: var(--shadow-pop);
+}
+.dialog[open] {
+  animation: dialog-in var(--dur-in) var(--ease);
+}
+@keyframes dialog-in {
+  from {
+    opacity: 0;
+    transform: scale(0.98);
+  }
 }
 .dialog::backdrop {
-  background: color-mix(in srgb, var(--bg) 50%, transparent);
+  background: color-mix(in srgb, var(--bg) 60%, transparent);
+  backdrop-filter: blur(2px);
 }
 .dialog-title {
   margin: 0;
+  font-size: var(--text-heading);
   font-weight: 600;
 }
 .dialog-text {
@@ -559,15 +596,26 @@
   display: flex;
   justify-content: flex-end;
   gap: 8px;
-  margin-top: 12px;
+  margin-top: 16px;
 }
+/* Hover and press lay a translucent tint over any button colour, so one rule serves every variant. */
 .btn {
-  height: 24px;
+  height: 28px;
   padding: 0 12px;
   border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background: var(--surface);
+  border-radius: var(--radius-card);
+  background-color: var(--surface);
+  color: var(--fg);
+  font-weight: 500;
+  white-space: nowrap;
   cursor: pointer;
+  transition: background-color var(--dur-out) var(--ease), border-color var(--dur-out) var(--ease);
+}
+.btn:hover:not(:disabled) {
+  background-image: linear-gradient(var(--hover), var(--hover));
+}
+.btn:active:not(:disabled) {
+  background-image: linear-gradient(var(--pressed), var(--pressed));
 }
 .btn-danger {
   border-color: var(--danger);
@@ -581,29 +629,177 @@
   gap: 4px;
 }
 .btn:disabled {
-  cursor: default;
-  color: var(--faint);
+  cursor: not-allowed;
+  opacity: 0.5;
 }
 .btn-primary {
   border-color: var(--accent);
-  background: var(--accent);
+  background-color: var(--accent);
   color: var(--bg);
+  font-weight: 600;
 }
 .btn-small {
-  height: 22px;
+  height: 24px;
   padding: 0 8px;
   font-size: var(--text-label-lg);
 }
 .input {
   width: 100%;
   min-width: 0;
-  padding: 4px 8px;
+  min-height: 28px;
+  padding: 4px 10px;
   border: 1px solid var(--line);
-  border-radius: var(--radius);
+  border-radius: var(--radius-card);
   background: var(--bg);
   color: var(--fg);
   font-size: var(--text-label-lg);
   line-height: 18px;
+  transition: border-color var(--dur-out) var(--ease), box-shadow var(--dur-out) var(--ease);
+}
+.input:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--muted) 50%, var(--line));
+}
+/* The accent border plus a soft ring replaces the outline, so focus stays visible without a double ring. */
+.input:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.input[aria-invalid="true"] {
+  border-color: var(--danger);
+}
+.input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Stepper: one bordered control, − value +, shared by Settings and the launcher. */
+.stepper {
+  display: inline-flex;
+  align-items: stretch;
+  flex: none;
+  height: 28px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--bg);
+  overflow: hidden;
+  transition: border-color var(--dur-out) var(--ease), box-shadow var(--dur-out) var(--ease);
+}
+.stepper:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.stepper.is-invalid {
+  border-color: var(--danger);
+}
+.stepper button {
+  width: 28px;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font-size: 15px;
+  cursor: pointer;
+}
+.stepper button:hover:not(:disabled) {
+  background: var(--hover);
+  color: var(--fg);
+}
+.stepper button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.stepper input,
+.stepper-n {
+  width: 64px;
+  border: 0;
+  border-left: 1px solid var(--line);
+  border-right: 1px solid var(--line);
+  background: none;
+  color: var(--fg);
+  font-size: var(--text-label-lg);
+  text-align: center;
+}
+.stepper input:focus-visible,
+.stepper button:focus-visible {
+  outline: none;
+  background: var(--accent-soft);
+}
+.stepper-n {
+  display: inline-grid;
+  place-items: center;
+  width: 36px;
+}
+
+/* Switch: a native checkbox with role="switch", drawn as a track and knob. */
+.switch {
+  appearance: none;
+  position: relative;
+  flex: none;
+  width: 32px;
+  height: 18px;
+  margin: 0;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--muted) 45%, var(--line));
+  cursor: pointer;
+  transition: background-color var(--dur-in) var(--ease);
+}
+.switch::before {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--knob);
+  box-shadow: 0 1px 2px color-mix(in srgb, black 30%, transparent);
+  transition: transform var(--dur-in) var(--ease);
+}
+.switch:checked {
+  background: var(--accent);
+}
+.switch:checked::before {
+  transform: translateX(14px);
+}
+.switch-danger:checked {
+  background: var(--danger);
+}
+.switch:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* Select: native element for keyboard and screen readers; the chevron is an icon laid over it. */
+.select {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+.select select {
+  appearance: none;
+  min-width: 160px;
+  padding-right: 30px;
+  cursor: pointer;
+}
+.select > svg {
+  position: absolute;
+  right: 10px;
+  color: var(--muted);
+  pointer-events: none;
+}
+
+/* Agent identity tile (D-036): neutral glyph, tinted square. */
+.agent-mark {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  border-radius: 28%;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.agent-mark-shell {
+  background: var(--hover);
+  color: var(--muted);
 }
 textarea.input {
   resize: vertical;
@@ -923,6 +1119,7 @@ textarea.input {
   border: 1px solid var(--line);
   border-radius: var(--radius-card);
   background: var(--raised);
+  box-shadow: var(--shadow-pop);
   pointer-events: auto;
   animation: toast-in var(--dur-in) var(--ease);
 }

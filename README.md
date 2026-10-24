@@ -75,6 +75,19 @@ Untuk pengembangan di macOS:
 
 Versi dan panduan lengkap ada di [docs/SETUP.md](docs/SETUP.md).
 
+## Pasang
+
+Satu perintah di Terminal macOS (Apple Silicon). Skrip membangun agentdeck dari kode sumber lalu memasangnya ke
+Applications; prasyarat yang belum ada (Xcode Command Line Tools, Node.js 22+, pnpm, Rust) hanya ditampilkan perintah
+pasangnya, tidak dipasang diam-diam:
+
+~~~bash
+curl -fsSL https://raw.githubusercontent.com/Nuzzy32/agentdeck/main/install.sh | sh
+~~~
+
+Jalankan perintah yang sama untuk memperbarui. Pilihan: `sh -s -- --dry-run` (hanya menampilkan langkah), `--ref <tag>`,
+`--dest <folder>`. Windows dan Linux belum didukung; statusnya ada di [docs/PLATFORMS.md](docs/PLATFORMS.md).
+
 ## Mulai cepat
 
 ~~~bash
@@ -128,6 +141,7 @@ Sebelum mengirim perubahan, jalankan pemeriksaan yang relevan dan coba perilaku 
 - [Phase 0](docs/PHASE-0.md) — bukti spike dengan CLI asli.
 - [Setup](docs/SETUP.md) — instalasi, dependency, dan perintah harian.
 - [Decision log](docs/DECISIONS.md) — keputusan arsitektur dan alasan teknisnya.
+- [Platform](docs/PLATFORMS.md) — status macOS, Windows, dan Linux beserta blocker yang tersisa.
 - [Research](docs/RESEARCH.md) — riset pendekatan dan produk pembanding.
 
 ## Batasan saat ini

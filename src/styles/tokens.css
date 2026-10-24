@@ -21,8 +21,18 @@
   --text-label: 11px;
   --text-label-lg: 12px;
 
+  --text-heading: 15px;
+  --text-title: 20px;
+
   --radius: 4px;
   --radius-card: 8px;
+  --radius-modal: 12px;
+  /* Derived from the colours above, so they follow the theme without new hex values. */
+  --hover: color-mix(in srgb, var(--fg) 7%, transparent);
+  --pressed: color-mix(in srgb, var(--fg) 12%, transparent);
+  --accent-soft: color-mix(in srgb, var(--accent) 16%, transparent);
+  --knob: #ffffff;
+  --shadow-pop: 0 16px 40px color-mix(in srgb, black 28%, transparent), 0 0 0 1px var(--line);
   --ease: cubic-bezier(0.2, 0, 0, 1);
   --dur-in: 160ms;
   --dur-out: 120ms;

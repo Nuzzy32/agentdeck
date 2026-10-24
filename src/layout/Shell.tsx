@@ -1,6 +1,6 @@
 import { type Ref, useEffect, useId, useRef } from "react";
 import type { LoopGuard } from "../core/messages";
-import { Icon, IconButton } from "./Icon";
+import { AgentMark, Icon, IconButton } from "./Icon";
 import { nearLimit } from "./logic";
 import { MessagesPanel as MessagesList, type PanelMessage } from "../messages/MessagesPanel";
 import type { Pane } from "./model";
@@ -137,8 +137,9 @@ export function Sidebar({
                     </span>
                   ) : null}
                   <StatusDot pane={pane} />
-                  <span className="mono">{pane.id}</span>
+                  <AgentMark id={pane.agentId} size={16} />
                   <span className="row-name">{pane.agent}</span>
+                  <span className="mono row-meta">{pane.id}</span>
                   {pane.pending > 0 ? (
                     <span className="count" aria-label={`${pane.pending} pesan menunggu`}>
                       {pane.pending}

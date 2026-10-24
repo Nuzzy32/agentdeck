@@ -135,12 +135,13 @@ describe("Kolaborasi and Terminal save at once", () => {
     expect(onChange).toHaveBeenLastCalledWith({ limits: { loop_guard: 20 } });
   });
 
-  it("theme radio and merge", () => {
+  it("theme select and merge", () => {
     const onChange = vi.fn();
     const tree = TerminalSection({ settings: DEFAULTS, onChange });
-    const checked = all(tree).filter((e) => e.type === "input" && e.props.checked === true);
-    expect(checked.map((e) => e.props.value)).toEqual(["system"]);
-    call(find(tree, (e) => e.type === "input" && e.props.value === "light"), "onChange");
+    const theme = find(tree, (e) => e.props.label === "Tema terminal");
+    expect(theme.props.value).toBe("system");
+    expect((theme.props.options as { id: string }[]).map((o) => o.id)).toEqual(["system", "dark", "light"]);
+    call(theme, "onChange", "light");
     expect(onChange).toHaveBeenLastCalledWith({ terminal: { theme: "light" } });
     const next = merge(DEFAULTS, { terminal: { theme: "light" } });
     expect(next.terminal).toEqual({ ...DEFAULTS.terminal, theme: "light" });
@@ -187,7 +188,7 @@ describe("Agen", () => {
     const html = renderToStaticMarkup(
       <AgentsSection view={{ agents: [claude], detailed: true }} error={null} onSetPath={() => {}} />,
     );
-    for (const s of ["Terdeteksi", "2.1.0", "/opt/homebrew/bin/claude", "Login: Claude.ai · Pro", "Simpan path"]) {
+    for (const s of ["Terdeteksi", "2.1.0", "/opt/homebrew/bin/claude", "<dt>Login</dt><dd>Claude.ai · Pro</dd>", "Simpan path"]) {
       expect(html).toContain(s);
     }
     expect(html).toContain("agentdeck tidak meneruskan ANTHROPIC_API_KEY");
@@ -198,6 +199,14 @@ describe("Agen", () => {
     expect(renderToStaticMarkup(<AgentsSection view={null} error={null} onSetPath={() => {}} />)).toContain(
       "Memeriksa agen",
     );
+  });
+
+  it("a failed read shows the error with a retry button", () => {
+    const onRetry = vi.fn();
+    const tree = AgentsSection({ view: null, error: "boom", onSetPath: () => {}, onRetry });
+    expect(text(tree)).toContain("Daftar agen tidak terbaca: boom");
+    call(find(tree, (e) => e.type === "button" && text(e.props.children).includes("Coba lagi")), "onClick");
+    expect(onRetry).toHaveBeenCalledOnce();
   });
 });
 

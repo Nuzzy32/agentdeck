@@ -155,15 +155,17 @@ Daftar terbaru di bawah. Setiap baris:
 - `Saling kirim: aktif|mati`: klik langsung mengubah sakelar workspace (dengan konfirmasi saat menyalakan).
 - `Pesan antar agen n/N` (N dari Settings, bawaan 12): berubah amber di ≥ 75%.
 
-### 4.6 Settings (`⌘,`, modal 640 × 520 di dalam jendela utama)
-Navigasi kiri per bagian; `Esc` menutup; fokus kembali ke pane sebelumnya.
+### 4.6 Settings (`⌘,`, modal 860 × 640 di dalam jendela utama, menyusut sampai jendela 900 × 600)
+Navigasi kiri berkelompok dengan ikon (panah atas/bawah memindah bagian); tiap bagian punya judul, satu baris deskripsi,
+dan baris label + kontrol di kartu. `Esc` atau tombol ✕ menutup; fokus kembali ke pane sebelumnya (D-036).
 
 | Bagian | Isi |
 |---|---|
 | Agen | Per agen: terdeteksi/tidak, path, versi; P1: metode login dari CLI dan peringatan `ANTHROPIC_API_KEY`; P1: path manual. |
 | Kolaborasi | Sakelar global "Agen boleh membuka pane" (bawaan mati); bawaan "Saling kirim" untuk workspace baru; angka batas dengan rentang dari MCP-TOOLS (stepper, nilai di luar rentang ditolak di tempat). |
 | Terminal | Font, ukuran, tinggi baris, scrollback, tema (Sistem/Gelap/Terang), mode pembaca layar xterm.js. |
-| Tentang | Versi, tautan ke docs, tombol buka folder log. |
+| Pintasan | Daftar §7, hanya baca. |
+| Tentang | Versi, lisensi, perintah pasang/perbarui (`install.sh`, D-037) dengan Salin, tombol buka folder log, disclaimer tidak berafiliasi. |
 
 Perubahan tersimpan langsung; tidak ada tombol Simpan.
 
@@ -241,7 +243,9 @@ Ukuran 13 px menyimpang dari saran web 16 px karena ini aplikasi desktop macOS y
 
 ### Bentuk, jarak, gerak
 - Grid 4 px. Padding header 0 8 px; kartu 12 px; jarak antar kontrol 8 px.
-- Radius 4 px; kartu dan popover 8 px.
+- Radius 4 px; kartu, tombol, input, dan popover 8 px; modal 12 px (`--radius-modal`).
+- Token turunan (D-036): `--hover`/`--pressed` (lapisan tembus pandang untuk hover/tekan), `--accent-soft` (latar
+  aktif dan cincin fokus input), `--knob`, `--shadow-pop`, `--text-heading` 15 px, `--text-title` 20 px.
 - Lapisan dibedakan oleh warna permukaan dan garis `--line`. Bayangan hanya untuk kartu, popover, dan toast.
 - Gerak hanya `opacity` dan `transform`, 120–160 ms, `cubic-bezier(0.2, 0, 0, 1)`; keluar lebih cepat dari masuk.
   `prefers-reduced-motion: reduce` mematikan semuanya, termasuk denyut status.

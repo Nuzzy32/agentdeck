@@ -97,7 +97,7 @@ pub fn shell(mut env: Vec<(String, OsString)>) -> Launch {
         .iter()
         .find(|(k, _)| k == "SHELL")
         .and_then(|(_, v)| v.to_str())
-        .filter(|s| s.starts_with('/'))
+        .filter(|s| Path::new(s).is_absolute())
         .unwrap_or("/bin/zsh")
         .to_owned();
     if Path::new(&shell).file_name() == Some("zsh".as_ref())
@@ -119,6 +119,7 @@ const ZSHENV: &str = include_str!("../shell/zsh/.zshenv");
 /// `<tmp>/agentdeck-zsh-<uid>/.zshenv`, ditulis ulang tiap peluncuran (tulis lalu rename, jadi zsh yang sedang mulai
 /// tidak membaca setengah berkas). Zsh men-source berkas ini, jadi folder harus milik kita dan tertutup
 /// (0700, bukan symlink): tanpa `TMPDIR` folder ada di `/tmp` yang bisa ditulis pengguna lain.
+#[cfg(unix)]
 fn zsh_integration(tmp: &Path) -> Option<std::path::PathBuf> {
     use std::os::unix::fs::{DirBuilderExt, MetadataExt, PermissionsExt};
     // SAFETY: getuid tidak pernah gagal dan tidak menyentuh memori.
@@ -136,6 +137,12 @@ fn zsh_integration(tmp: &Path) -> Option<std::path::PathBuf> {
     std::fs::write(&part, ZSHENV).ok()?;
     std::fs::rename(&part, dir.join(".zshenv")).ok()?;
     Some(dir)
+}
+
+/// Tanpa Unix tidak ada zsh bawaan; shell berjalan polos (docs/PLATFORMS.md).
+#[cfg(not(unix))]
+fn zsh_integration(_tmp: &Path) -> Option<std::path::PathBuf> {
+    None
 }
 
 /// Agen dari katalog: path manual bila diisi, selain itu biner dicari di `PATH` env itu sendiri; tugas setelah `--`

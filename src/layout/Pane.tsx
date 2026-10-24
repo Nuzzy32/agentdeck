@@ -1,6 +1,6 @@
 import { type ReactNode, useState } from "react";
 import { TerminalPane } from "../pane/TerminalPane";
-import { Icon, IconButton } from "./Icon";
+import { AgentMark, Icon, IconButton } from "./Icon";
 import { splitMiddle } from "./logic";
 import { type Pane, type Report, reportBadge, statusLabel, type Usage, usageBadge } from "./model";
 
@@ -106,8 +106,9 @@ export function PaneView({
             </span>
           ) : null}
         </span>
-        <span className="mono pane-id">{pane.id}</span>
+        <AgentMark id={pane.agentId} size={18} />
         <span className="pane-agent">{pane.agent}</span>
+        <span className="mono pane-id">{pane.id}</span>
         <span className="pane-title" title={pane.title}>
           {pane.title}
         </span>

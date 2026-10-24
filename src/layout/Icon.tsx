@@ -59,6 +59,33 @@ const PATHS = {
       <path d="M2 14h2m16 0h2m-7-1v2m-6-2v2" />
     </>
   ),
+  info: (
+    <>
+      <circle cx="12" cy="12" r="10" />
+      <path d="M12 16v-4m0-4h.01" />
+    </>
+  ),
+  keyboard: (
+    <>
+      <rect width="20" height="16" x="2" y="4" rx="2" />
+      <path d="M6 8h.01M10 8h.01M14 8h.01M18 8h.01M8 12h.01M12 12h.01M16 12h.01M7 16h10" />
+    </>
+  ),
+  users: (
+    <>
+      <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+      <circle cx="9" cy="7" r="4" />
+      <path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" />
+    </>
+  ),
+  check: <path d="M20 6L9 17l-5-5" />,
+  download: <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4m4-5l5 5l5-5m-5 5V3" />,
+  refresh: (
+    <>
+      <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8" />
+      <path d="M21 3v5h-5" />
+    </>
+  ),
   sparkles: (
     <>
       <path d="M11.017 2.814a1 1 0 0 1 1.966 0l1.051 5.558a2 2 0 0 0 1.594 1.594l5.558 1.051a1 1 0 0 1 0 1.966l-5.558 1.051a2 2 0 0 0-1.594 1.594l-1.051 5.558a1 1 0 0 1-1.966 0l-1.051-5.558a2 2 0 0 0-1.594-1.594l-5.558-1.051a1 1 0 0 1 0-1.966l5.558-1.051a2 2 0 0 0 1.594-1.594zM20 2v4m2-2h-4" />
@@ -104,5 +131,25 @@ export function IconButton({
     <button type="button" className="icon-btn" aria-label={label} title={label} aria-pressed={pressed} onClick={onClick}>
       <Icon name={icon} />
     </button>
+  );
+}
+
+const AGENT_ICON: Record<string, IconName> = { "claude-code": "sparkles", codex: "bot" };
+
+/** Glyph for a catalogue agent id; shells and unknown agents get the terminal prompt. */
+export function agentIcon(id: string | null): IconName {
+  return (id && AGENT_ICON[id]) || "terminal";
+}
+
+/**
+ * Agent identity tile: a neutral glyph on a tinted square. No provider logos (DECISIONS D-036); the tile tells agents
+ * from shells, the name next to it tells agents apart.
+ */
+export function AgentMark({ id, size = 16 }: { id: string | null; size?: number }) {
+  const shell = id === null || id === "shell";
+  return (
+    <span className={`agent-mark${shell ? " agent-mark-shell" : ""}`} style={{ width: size, height: size }} aria-hidden="true">
+      <Icon name={agentIcon(id)} size={Math.round(size * 0.66)} />
+    </span>
   );
 }

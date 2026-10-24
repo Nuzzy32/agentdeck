@@ -660,3 +660,44 @@ halaman merek OpenAI menjawab 403 (hanya terbaca lewat cuplikan pencarian, belum
   folder, menu cara login, dan konfirmasi membuka browser → `blocked` prioritas 1000 (mengalahkan `esc_cancel_working`
   herdr yang membaca footer "Esc to cancel" sebagai bekerja). Tes memakai layar yang terlihat dari Gemini CLI 0.46.0;
   uji manual (hanya mengamati) dengan Gemini asli: dialog trust kini `needs_you`.
+
+## D-036 — Tampilan profesional: Settings baru, token turunan, tanda agen netral (2026-10-24)
+- Permintaan pemilik: Settings dan seluruh aplikasi terasa seperti aplikasi desktop profesional; referensi kualitas
+  visual dari aplikasi lain hanya sebagai acuan, tanpa menyalin teks, aset, atau kode.
+- **Settings:** modal 860 × 640 (menyusut ke jendela 900 × 600), navigasi berkelompok dengan ikon (Agen: Agen,
+  Kolaborasi; Tampilan: Terminal, Pintasan; Lainnya: Tentang), judul + deskripsi per bagian, baris label/kontrol di
+  kartu. Kontrol: switch (`input type=checkbox role=switch`), select native untuk tema, stepper satu bingkai
+  (dipakai juga di peluncur), path manual dengan dialog pilih berkas, pratinjau perintah dengan Salin. Panah atas/bawah
+  memindah bagian. Agen: kerangka saat memuat, galat dengan Coba lagi. Bagian baru: Pintasan (dari §7) dan Tentang
+  (versi, lisensi, perintah pasang, folder log, disclaimer).
+- **Token turunan** di `tokens.css`: `--hover`, `--pressed`, `--accent-soft` (color-mix dari token warna, jadi ikut
+  tema tanpa hex baru), `--knob`, `--shadow-pop`, `--radius-modal`, `--text-heading`, `--text-title`. Tombol, input,
+  dialog, sidebar, header pane, status bar, dan toast memakai token itu.
+- **Saran skill desain ditolak sebagian:** Inter dari Google Fonts dan tema gelap saja bertentangan dengan "lokal
+  saja" (font sistem) dan UI-UX §6 (terang + gelap). Daftar periksanya (fokus, kontras, gerak dikurangi) dipakai.
+- **Ikon agen:** tidak ada aset logo Claude/Codex resmi di repo, dan D-026 melarang merek provider sebagai identitas
+  agentdeck. Jadi `AgentMark`: glif Lucide netral (sparkles, bot, terminal) di petak berwarna token; nama agen di
+  sebelahnya yang membedakan. Logo resmi hanya bila asetnya resmi dan lisensinya jelas.
+
+## D-037 — Pasang agentdeck dengan satu perintah (`install.sh`) (2026-10-24)
+- Permintaan pemilik: memasang aplikasi lewat CLI seperti proyek lain (`curl … | sh`).
+- Belum ada rilis biner bertanda tangan (D-026, T5.2), jadi skrip membangun dari sumber: cek prasyarat (Xcode CLT,
+  git, Node 22+, pnpm, cargo), clone/perbarui ke `~/.agentdeck/src`, `pnpm tauri build --bundles app`, salin ke
+  `/Applications` (atau `~/Applications` bila tidak bisa ditulis) lewat salinan lalu tukar.
+- Pagar: tidak memasang toolchain (hanya mencetak perintahnya), tanpa sudo, menolak folder sumber asing atau yang punya
+  perubahan lokal, menolak bila agentdeck sedang berjalan, `--ref` divalidasi, seluruh isi di dalam `main()` supaya
+  unduhan terpotong tidak dieksekusi, `--dry-run` tidak mengubah apa pun. Hanya macOS; platform lain ditolak dengan
+  rujukan ke `docs/PLATFORMS.md`.
+- Setelah notarisasi ada, skrip bisa beralih mengunduh `.dmg` rilis; Homebrew tap menyusul bila ada rilis.
+- Di dalam aplikasi, perintah pasang agen (katalog) dan perintah ini hanya ditampilkan dengan tombol Salin; aplikasi
+  tidak pernah menjalankan perintah pasang sendiri.
+
+## D-038 — Status platform jujur; fondasi portabilitas tanpa klaim Windows (2026-10-24)
+- Audit kode (dicatat di `docs/PLATFORMS.md`): Windows belum bisa dikompilasi (sinyal Unix di `pty.rs`), dan butuh
+  env anak Windows, penanganan `.cmd` npm yang aman, shell bawaan, pintasan `Ctrl+Shift`, Job Object. Linux belum
+  pernah dibangun; pemindaian turunan proses hanya ada di macOS.
+- `cargo check --target x86_64-pc-windows-msvc` di Mac tidak bisa berjalan (tauri-build butuh `llvm-rc`), jadi bukti
+  kompilasi Windows harus dari mesin Windows atau CI `windows-latest`.
+- Dikerjakan sekarang, tanpa perubahan perilaku di macOS: `split_paths`/`is_absolute` untuk `PATH` dan `$SHELL`,
+  `#[cfg(unix)]` pada bit eksekusi dan integrasi zsh. `pty.rs` sengaja belum disentuh: jalur Windows-nya perlu desain
+  (ChildKiller + Job Object) dan uji di Windows asli.
