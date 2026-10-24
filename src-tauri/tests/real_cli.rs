@@ -1,6 +1,8 @@
 //! Manual, costs quota: real Claude Code and Codex launched through `panes::start` (clean env, MCP injected) talk
 //! over `pane_send` (ARCHITECTURE §12, T2.7). Run with
 //! `cargo test --test real_cli -- --ignored --nocapture`. Prints the screens and message rows at the end.
+// Uses Unix permissions and a #!/bin/sh wrapper.
+#![cfg(unix)]
 
 use std::path::PathBuf;
 use std::sync::Arc;

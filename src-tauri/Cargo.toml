@@ -19,7 +19,6 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-libc = "0.2"
 portable-pty = "0.9"
 tauri = { version = "2", features = [] }
 # OS CSPRNG for pane tokens (tokens.rs); already in the tree via tauri, smaller than `rand`.
@@ -42,6 +41,10 @@ regex = "1"
 tauri-plugin-dialog = "2"
 # macOS notification for a spawn card while the window is not focused (UI-UX §4.2, D-022). Sent from Rust only.
 tauri-plugin-notification = "2"
+
+# Signals and process groups (pty.rs), uid (launch.rs); Unix only.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
 
 [dev-dependencies]
 # HTTP client for the MCP integration test (tests/mcp_server.rs) only.

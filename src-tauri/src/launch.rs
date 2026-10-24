@@ -206,7 +206,8 @@ pub fn agent(
     })
 }
 
-#[cfg(test)]
+// Uses Unix permissions, symlinks and zsh.
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
     use std::os::unix::fs::PermissionsExt;

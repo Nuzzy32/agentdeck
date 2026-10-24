@@ -469,7 +469,8 @@ impl Launch {
     }
 }
 
-#[cfg(test)]
+// Uses Unix permissions, symlinks and #!/bin/sh fakes.
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
     use crate::pty::PaneManager;

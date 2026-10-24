@@ -745,7 +745,8 @@ fn set_path_in(dir: &Path, id: &str, path: Option<&str>) -> Result<(), String> {
         .map_err(|e| format!("Path manual tidak tersimpan: {e}"))
 }
 
-#[cfg(test)]
+// Uses Unix permissions, #!/bin/sh fakes and login shells.
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
 
