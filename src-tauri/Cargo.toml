@@ -37,6 +37,9 @@ tokio = { version = "1", features = ["net", "rt", "macros", "sync", "time"] }
 vt100 = "0.18"
 # Screen state rules ported from herdr (detect.rs, D-035); the official rust-lang crate, linear-time matching.
 regex = "1"
+# canonicalize without the Windows `\\?\` prefix (git and agents reject it); std's own on Unix. Already in the tree via
+# tauri (D-040).
+dunce = "1"
 # Native folder picker in the launcher (UI-UX §4.1, D-021). Official Tauri plugin; only `dialog:allow-open` granted.
 tauri-plugin-dialog = "2"
 # macOS notification for a spawn card while the window is not focused (UI-UX §4.2, D-022). Sent from Rust only.

@@ -1138,8 +1138,7 @@ pub fn start_in_worktree(
     root: &Path,
     on_event: OnEvent,
 ) -> Result<Started, LaunchError> {
-    let cwd = Path::new(&spec.cwd)
-        .canonicalize()
+    let cwd = dunce::canonicalize(&spec.cwd)
         .map_err(|e| LaunchError::new(format!("Folder tidak ditemukan: {} ({e})", spec.cwd)))?;
     let name = lock(panes).next_id();
     let wt = worktree::create(root, &name)

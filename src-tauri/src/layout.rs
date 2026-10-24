@@ -352,6 +352,13 @@ pub async fn layout_save(
 mod tests {
     use super::*;
 
+    /// An absolute folder on this platform; `/Users/u/app` is not absolute on Windows.
+    const APP: &str = if cfg!(windows) {
+        r"C:\Users\u\app"
+    } else {
+        "/Users/u/app"
+    };
+
     struct Dir(PathBuf);
 
     impl Dir {
@@ -376,7 +383,7 @@ mod tests {
             agent: Some("claude-code".into()),
             name: "Claude Code".into(),
             title: "feat: auth".into(),
-            cwd: "/Users/u/app".into(),
+            cwd: APP.into(),
             parent: parent.map(Into::into),
             worktree: None,
             session: None,
@@ -394,7 +401,7 @@ mod tests {
             workspaces: vec![SavedWorkspace {
                 id: 3,
                 name: "app".into(),
-                folder: "/Users/u/app".into(),
+                folder: APP.into(),
                 tree: Tree::Split {
                     dir: super::Dir::Row,
                     ratio: 0.5,
@@ -414,7 +421,11 @@ mod tests {
             "panes":[{"id":"p1","agent":"claude-code","name":"Claude Code","title":"feat: auth","cwd":"/Users/u/app",
             "parent":null},{"id":"p4","agent":"claude-code","name":"Claude Code","title":"feat: auth",
             "cwd":"/Users/u/app","parent":"p1"}]}]}"#;
-        let l: Layout = serde_json::from_str(json).expect("parses");
+        let json = json.replace(
+            "\"/Users/u/app\"",
+            &serde_json::to_string(APP).expect("json string"),
+        );
+        let l: Layout = serde_json::from_str(&json).expect("parses");
         assert_eq!(l, two());
     }
 
@@ -524,7 +535,7 @@ mod tests {
             l.workspaces.push(SavedWorkspace {
                 id: w + 1,
                 name: "w".into(),
-                folder: "/w".into(),
+                folder: APP.into(),
                 tree,
                 focused: ids[0].clone(),
                 panes: ids.iter().map(|id| pane(id, None)).collect(),

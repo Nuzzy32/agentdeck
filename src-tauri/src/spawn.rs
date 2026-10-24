@@ -126,7 +126,7 @@ fn check_text(title: &str, task: &str) -> Result<(), String> {
 /// The child's folder: `requested` (absolute, no `..`) after resolving symlinks, which must be inside the caller's
 /// folder (also resolved); the caller's folder when `None`.
 pub fn child_cwd(caller: &Path, requested: Option<&str>) -> Result<PathBuf, String> {
-    let base = caller.canonicalize().map_err(|_| {
+    let base = dunce::canonicalize(caller).map_err(|_| {
         "CWD_OUTSIDE: your own folder no longer exists, so no folder is inside it. Tell the person.".to_owned()
     })?;
     let Some(req) = requested else {
@@ -136,7 +136,7 @@ pub fn child_cwd(caller: &Path, requested: Option<&str>) -> Result<PathBuf, Stri
     if !p.is_absolute() || p.components().any(|c| c == Component::ParentDir) {
         return Err(bad("cwd must be an absolute path without \"..\""));
     }
-    let real = p.canonicalize().map_err(|_| bad("cwd does not exist"))?;
+    let real = dunce::canonicalize(p).map_err(|_| bad("cwd does not exist"))?;
     if !real.starts_with(&base) {
         return Err(format!(
             "CWD_OUTSIDE: {req} is outside your working folder {}. Fix the path, or leave cwd out.",
@@ -486,7 +486,7 @@ mod tests {
         ));
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
-        d.canonicalize().unwrap()
+        dunce::canonicalize(&d).unwrap()
     }
 
     fn on() -> Settings {

@@ -35,7 +35,7 @@ fn real(p: &Path) -> Option<PathBuf> {
     let mut missing = Vec::new();
     let mut cur = p;
     loop {
-        if let Ok(found) = cur.canonicalize() {
+        if let Ok(found) = dunce::canonicalize(cur) {
             return Some(missing.iter().rev().fold(found, |acc, n| acc.join(n)));
         }
         if cur.symlink_metadata().is_ok() {
@@ -51,7 +51,7 @@ pub fn resolve(cwd: &Path, raw: &[String]) -> Result<Vec<PathBuf>, String> {
     if raw.len() > CLAIMS_MAX {
         return Err(bad("paths holds at most 10 entries"));
     }
-    let base = cwd.canonicalize().map_err(|_| {
+    let base = dunce::canonicalize(cwd).map_err(|_| {
         "PATH_OUTSIDE: your own folder no longer exists, so nothing can be claimed in it. Tell the person.".to_owned()
     })?;
     let mut out: Vec<PathBuf> = Vec::new();
@@ -118,7 +118,7 @@ mod tests {
         ));
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(d.join("work/src")).unwrap();
-        d.canonicalize().unwrap()
+        dunce::canonicalize(&d).unwrap()
     }
 
     fn strs(v: &[&str]) -> Vec<String> {

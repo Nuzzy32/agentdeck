@@ -7,7 +7,7 @@ berarti belum pernah dibangun atau dijalankan di platform itu; jangan dibaca seb
 |---|---|---|
 | macOS 13+ Apple Silicon | **Didukung** | `cargo test` (234), `pnpm test`, `pnpm tauri build` → `.app` + `.dmg`, uji di aplikasi berjalan |
 | macOS Intel | Belum diverifikasi | Tidak ada mesin uji; kode tidak memakai API khusus arm64 |
-| Windows 10/11 | **Belum didukung** — kompilasi belum terbukti | Blocker kompilasi yang diketahui sudah di-`cfg` (D-039), tapi Mac tidak bisa memeriksanya (tauri-build butuh `llvm-rc`). Bukti hanya dari CI `windows-latest` (`.github/workflows/check.yml`), yang belum pernah berjalan |
+| Windows 10/11 | **Belum didukung** — terkompilasi, tes sebagian | CI `windows-latest` 2026-10-24: typecheck, tes UI, fmt, clippy lulus; `cargo test` lib 155/165 sebelum D-040, hasil setelahnya lihat run CI terbaru. Belum pernah dijalankan sebagai aplikasi |
 | Linux | Belum diverifikasi | Audit kode; tidak pernah dibangun |
 
 ## Fitur per platform

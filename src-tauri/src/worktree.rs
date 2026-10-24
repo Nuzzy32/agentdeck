@@ -75,7 +75,7 @@ pub fn repo_root(dir: &Path) -> Option<PathBuf> {
     if common.file_name()? != ".git" {
         return None; // bare repository: no working tree to branch from
     }
-    common.parent()?.canonicalize().ok()
+    dunce::canonicalize(common.parent()?).ok()
 }
 
 fn branch_exists(repo: &Path, branch: &str) -> bool {
@@ -150,7 +150,7 @@ pub fn create(repo: &Path, name: &str) -> Result<Worktree, String> {
     )?;
     Ok(Worktree {
         repo: repo.to_owned(),
-        path: path.canonicalize().unwrap_or(path),
+        path: dunce::canonicalize(&path).unwrap_or(path),
         branch,
         base,
     })
@@ -160,7 +160,8 @@ pub fn create(repo: &Path, name: &str) -> Result<Worktree, String> {
 /// `<repo>/.worktrees/<name>`, the top of its own checkout, on branch `agent/<name>`, with both paths canonical. Closing
 /// a pane removes the worktree and deletes the branch, so a hand-edited file must not point that at anything else.
 pub fn still_ours(wt: &Worktree) -> bool {
-    let (Ok(repo), Ok(path)) = (wt.repo.canonicalize(), wt.path.canonicalize()) else {
+    let (Ok(repo), Ok(path)) = (dunce::canonicalize(&wt.repo), dunce::canonicalize(&wt.path))
+    else {
         return false;
     };
     let name = path.file_name().and_then(|n| n.to_str());
@@ -243,7 +244,7 @@ pub(crate) mod tests {
         std::fs::write(dir.join("src/a.txt"), "a\n").unwrap();
         git_ok(&dir, &["add", "."]).unwrap();
         git_ok(&dir, &["commit", "--quiet", "-m", "init"]).unwrap();
-        dir.canonicalize().unwrap()
+        dunce::canonicalize(&dir).unwrap()
     }
 
     #[test]

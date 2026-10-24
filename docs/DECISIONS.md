@@ -718,3 +718,15 @@ halaman merek OpenAI menjawab 403 (hanya terbaca lewat cuplikan pencarian, belum
   pernah berjalan (belum di-push). Jadi Windows tetap "belum didukung" sampai CI hijau. Tes lain memakai path gaya
   Unix dan mungkin gagal di Windows. Blocker runtime (env anak Windows, `.cmd` npm, shell bawaan, pintasan
   `Ctrl+Shift`) tidak disentuh: butuh mesin Windows asli (`docs/PLATFORMS.md`).
+
+## D-040 — `dunce::canonicalize` untuk semua path yang di-resolve; tes path per platform (2026-10-24)
+- Bukti CI Windows pertama (run 40059417100): kode terkompilasi dan clippy bersih; `cargo test` lib 155 lulus, 10
+  gagal. Lima karena data tes memakai `/Users/u/app` (bukan path absolut di Windows), lima karena `canonicalize()`
+  Windows mengembalikan path berawalan `\\?\`: `git worktree add` menolaknya, dan `pane_claim` mengirim `\\?\D:\…`
+  ke agen.
+- Semua `canonicalize()` (panes, worktree, spawn, klaim, beserta helper tesnya) diganti `dunce::canonicalize`: di
+  Unix sama persis dengan std, di Windows membuang `\\?\` bila aman. `dunce` 1.0.5 sudah ada di pohon dependency
+  lewat Tauri; jadi dependency langsung tanpa crate baru.
+- Tes layout memakai folder absolut per platform; tes `pane_claim` membangun path harapan dari akar yang di-resolve,
+  dan cek `/etc` → `PATH_OUTSIDE` hanya di Unix (di Windows `/etc` relatif terhadap drive, jadi di dalam pane yang
+  berada di akar drive).

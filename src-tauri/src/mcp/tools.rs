@@ -472,7 +472,20 @@ mod tests {
     #[test]
     fn pane_claim_paths_overlap_and_pane_list() {
         let (e, _) = engine();
-        // Panes of `engine()` sit in "/": claim paths that do not exist yet, so nothing on disk matters.
+        // Panes of `engine()` sit in "/": claim paths that do not exist yet, so nothing on disk matters. On Windows
+        // "/" resolves to the drive root, so expected paths are built from the resolved root.
+        let root = dunce::canonicalize("/").expect("root");
+        let at = |parts: &[&str]| {
+            parts
+                .iter()
+                .fold(root.clone(), |p, part| p.join(part))
+                .display()
+                .to_string()
+        };
+        let (src, a_rs) = (
+            at(&["agentdeck-claim-x", "src"]),
+            at(&["agentdeck-claim-x", "a.rs"]),
+        );
         let claim = |caller: &str, paths: Value| {
             call_json(&e, caller, "pane_claim", json!({"paths": paths}))
         };
@@ -481,18 +494,19 @@ mod tests {
             json!(["agentdeck-claim-x/src", "agentdeck-claim-x/a.rs"]),
         )
         .unwrap();
-        assert_eq!(
-            mine["claims"],
-            json!(["/agentdeck-claim-x/src", "/agentdeck-claim-x/a.rs"])
-        );
+        assert_eq!(mine["claims"], json!([src, a_rs]));
         let err = claim("p3", json!(["agentdeck-claim-x/src/lib.rs"])).unwrap_err();
+        let lib = at(&["agentdeck-claim-x", "src", "lib.rs"]);
         assert!(
-            err.starts_with("CLAIMED: /agentdeck-claim-x/src/lib.rs overlaps /agentdeck-claim-x/src, claimed by p2."),
+            err.starts_with(&format!("CLAIMED: {lib} overlaps {src}, claimed by p2.")),
             "{err}"
         );
         // Another workspace may claim the same path.
         assert!(claim("p5", json!(["agentdeck-claim-x/src"])).is_ok());
-        assert_eq!(code(claim("p3", json!(["/etc"]))), "PATH_OUTSIDE");
+        // On Windows "/etc" is relative to the drive, so it lies inside a pane that sits at the drive root.
+        if cfg!(unix) {
+            assert_eq!(code(claim("p3", json!(["/etc"]))), "PATH_OUTSIDE");
+        }
         assert_eq!(code(claim("p3", json!(["../etc"]))), "PATH_OUTSIDE");
         let eleven: Vec<String> = (0..11).map(|i| format!("f{i}")).collect();
         assert_eq!(code(claim("p3", json!(eleven))), "BAD_ARGS");
@@ -510,10 +524,7 @@ mod tests {
             "BAD_ARGS"
         );
         let l = call_json(&e, "p1", "pane_list", json!({})).unwrap();
-        assert_eq!(
-            l["panes"][1]["claims"],
-            json!(["/agentdeck-claim-x/src", "/agentdeck-claim-x/a.rs"])
-        );
+        assert_eq!(l["panes"][1]["claims"], json!([src, a_rs]));
         assert_eq!(l["panes"][0]["claims"], json!([]));
         // Released: p3 may now take it.
         assert_eq!(claim("p2", json!([])).unwrap()["claims"], json!([]));
