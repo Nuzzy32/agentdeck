@@ -360,5 +360,13 @@ async fn tools_listed_and_errors_are_tool_results() {
     let list = call(&f.p2, "pane_list", json!({})).await;
     let list: Value =
         serde_json::from_str(list["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
-    assert_eq!(list["panes"][0]["claims"], json!(["/agentdeck-it/src"]));
+    // Panes sit in "/", which is the drive root on Windows: expect the resolved root, not a literal "/".
+    let src = dunce::canonicalize("/")
+        .unwrap()
+        .join("agentdeck-it")
+        .join("src");
+    assert_eq!(
+        list["panes"][0]["claims"],
+        json!([src.display().to_string()])
+    );
 }
