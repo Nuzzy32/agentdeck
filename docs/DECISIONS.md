@@ -660,3 +660,20 @@ halaman merek OpenAI menjawab 403 (hanya terbaca lewat cuplikan pencarian, belum
   folder, menu cara login, dan konfirmasi membuka browser → `blocked` prioritas 1000 (mengalahkan `esc_cancel_working`
   herdr yang membaca footer "Esc to cancel" sebagai bekerja). Tes memakai layar yang terlihat dari Gemini CLI 0.46.0;
   uji manual (hanya mengamati) dengan Gemini asli: dialog trust kini `needs_you`.
+
+## D-039 — Blocker kompilasi Windows di-`cfg`; CI macOS + Windows sebagai bukti (2026-10-24)
+- Lanjutan D-038. Tanpa perubahan perilaku di macOS: hanya `#[cfg]` dan jalur kode baru untuk non-Unix.
+- `pty.rs`: `killpg`/`kill`/`SIGHUP`/`SIGTERM`/`SIGKILL`, `pid_t`, `descendants`, `wait_until`, `KILL_GRACE` di balik
+  `#[cfg(unix)]`. Di luar Unix, `Pane` menyimpan `ChildKiller` dari portable-pty dan `terminate` menutup output lalu
+  memanggil `kill()` (TerminateProcess): hanya anak langsung yang berhenti. Perbaikan sebenarnya adalah Job Object
+  dengan `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` (catatan `ponytail:` di kode); itu butuh dependency Windows
+  (`windows-sys`) dan uji di Windows asli, jadi ditunda.
+- `libc` pindah ke `[target.'cfg(unix)'.dependencies]`. Modul tes yang memakai `/bin/sh`, `perl`, `ps`, izin Unix,
+  atau symlink Unix (`pty.rs`, `spawn.rs`, `catalogue.rs`, `launch.rs`, `mcp/claim.rs`, `tests/fake_agent.rs`,
+  `tests/real_cli.rs`) di balik `#[cfg(unix)]` per modul; tes logika murni di modul itu ikut tidak jalan di Windows.
+- `.github/workflows/check.yml`: matriks `macos-latest` + `windows-latest`, `fail-fast: false`; `pnpm typecheck`,
+  `pnpm test`, `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test`.
+- **Belum terbukti:** Mac tidak bisa mengompilasi target Windows (tauri-build butuh `llvm-rc`), dan workflow belum
+  pernah berjalan (belum di-push). Jadi Windows tetap "belum didukung" sampai CI hijau. Tes lain memakai path gaya
+  Unix dan mungkin gagal di Windows. Blocker runtime (env anak Windows, `.cmd` npm, shell bawaan, pintasan
+  `Ctrl+Shift`) tidak disentuh: butuh mesin Windows asli (`docs/PLATFORMS.md`).

@@ -105,7 +105,8 @@ pub fn conflict<'a>(
     Ok(())
 }
 
-#[cfg(test)]
+// Uses Unix symlinks.
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
 

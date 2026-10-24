@@ -8,6 +8,8 @@ use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
+#[cfg(not(unix))]
+use portable_pty::ChildKiller;
 use portable_pty::{CommandBuilder, MasterPty, PtySize, native_pty_system};
 use serde::Serialize;
 use tauri::State;
@@ -23,6 +25,7 @@ pub const WINDOW: u64 = 128 << 10;
 /// Latest output kept for replay when a WebView (re)attaches; the oldest bytes are dropped.
 pub const REPLAY: usize = 1 << 20;
 /// Time between SIGTERM and SIGKILL on close.
+#[cfg(unix)]
 const KILL_GRACE: Duration = Duration::from_secs(3);
 /// Upper bound for `close_all`: KILL_GRACE, the 1 s wait after SIGKILL, and slack.
 const EXIT_LIMIT: Duration = Duration::from_secs(5);
@@ -237,7 +240,11 @@ pub(crate) struct Pane {
     master: Mutex<Box<dyn MasterPty + Send>>,
     writer: Writer,
     /// portable-pty calls setsid() in the child, so its pid is also its process group and session id.
+    #[cfg(unix)]
     pgid: libc::pid_t,
+    /// No process groups or signals here; see the non-Unix `terminate`.
+    #[cfg(not(unix))]
+    killer: Mutex<Box<dyn ChildKiller + Send + Sync>>,
     out: Arc<Output>,
     /// Last write that came from the person's keyboard or paste, not an xterm.js reply (ARCHITECTURE §5.2).
     typed_at: Mutex<Option<Instant>>,
@@ -261,11 +268,13 @@ fn err(e: impl std::fmt::Display) -> String {
 }
 
 /// `killpg`; returns false when no process in the group could be signalled (e.g. ESRCH).
+#[cfg(unix)]
 fn signal_group(pgid: libc::pid_t, sig: libc::c_int) -> bool {
     // SAFETY: killpg takes plain integers and has no memory-safety preconditions.
     unsafe { libc::killpg(pgid, sig) == 0 }
 }
 
+#[cfg(unix)]
 fn signal_pid(pid: libc::pid_t, sig: libc::c_int) -> bool {
     // SAFETY: kill takes plain integers and has no memory-safety preconditions.
     unsafe { libc::kill(pid, sig) == 0 }
@@ -292,12 +301,13 @@ fn descendants(pid: libc::pid_t) -> Vec<libc::pid_t> {
     found
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(all(unix, not(target_os = "macos")))]
 fn descendants(_pid: libc::pid_t) -> Vec<libc::pid_t> {
     Vec::new()
 }
 
 /// Waits until `pred` holds or `deadline` passes.
+#[cfg(unix)]
 fn wait_until(deadline: Instant, pred: impl Fn() -> bool) -> bool {
     while !pred() {
         if Instant::now() >= deadline {
@@ -337,14 +347,18 @@ impl PaneManager {
         }
         let mut child = pair.slave.spawn_command(cmd).map_err(err)?;
         drop(pair.slave);
-        let pgid = child
-            .process_id()
-            .and_then(|p| libc::pid_t::try_from(p).ok())
-            // killpg(0 or 1) would hit agentdeck's own group or every process; never allow it.
-            .filter(|&p| p > 1);
-        let Some(pgid) = pgid else {
-            let _ = child.kill();
-            return Err("child has no usable pid".into());
+        #[cfg(unix)]
+        let pgid = {
+            let pgid = child
+                .process_id()
+                .and_then(|p| libc::pid_t::try_from(p).ok())
+                // killpg(0 or 1) would hit agentdeck's own group or every process; never allow it.
+                .filter(|&p| p > 1);
+            let Some(pgid) = pgid else {
+                let _ = child.kill();
+                return Err("child has no usable pid".into());
+            };
+            pgid
         };
         let mut reader = pair.master.try_clone_reader().map_err(err)?;
         let writer: Writer = Arc::new(Mutex::new(pair.master.take_writer().map_err(err)?));
@@ -353,7 +367,10 @@ impl PaneManager {
         let pane = Pane {
             master: Mutex::new(pair.master),
             writer: writer.clone(),
+            #[cfg(unix)]
             pgid,
+            #[cfg(not(unix))]
+            killer: Mutex::new(child.clone_killer()),
             out: out.clone(),
             typed_at: Mutex::new(None),
             screen: screen.clone(),
@@ -491,6 +508,7 @@ impl PaneManager {
 /// terminal sends: an interactive shell ignores SIGTERM, but on SIGHUP it hangs up its background jobs. The
 /// descendant scan reaches what killpg cannot: jobs in their own group and processes in a session of their own
 /// (Claude Code's Bash tool runs each command that way, `ps` shows it as `Ss`).
+#[cfg(unix)]
 pub(crate) fn terminate(pane: &Pane) {
     pane.out.close();
     // Snapshot before signalling: once a parent dies its children move to launchd and drop out of the tree.
@@ -510,6 +528,15 @@ pub(crate) fn terminate(pane: &Pane) {
         signal(libc::SIGKILL);
         wait_until(Instant::now() + Duration::from_secs(1), gone);
     }
+}
+
+/// Without Unix signals: ends the pane's direct child. Not verified on a real Windows machine (docs/PLATFORMS.md).
+// ponytail: ChildKiller (TerminateProcess) stops only the direct child; its children live on. The real fix is a Job
+// Object with JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE around the child, so the whole tree ends with the pane.
+#[cfg(not(unix))]
+pub(crate) fn terminate(pane: &Pane) {
+    pane.out.close();
+    let _ = lock(&pane.killer).kill();
 }
 
 #[tauri::command]
@@ -557,7 +584,8 @@ pub async fn pane_ack(panes: State<'_, PaneManager>, id: u32, total: u64) -> Res
     panes.ack(id, total)
 }
 
-#[cfg(test)]
+// Spawns /bin/sh, perl and ps and checks Unix signals and process groups.
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
     use crate::launch;

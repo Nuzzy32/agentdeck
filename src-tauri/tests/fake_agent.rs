@@ -3,6 +3,8 @@
 //! in a real `PaneManager` pane, whose reader answers the query and reports status and exit code. T2.3: the agent
 //! launched through `panes::start` (catalogue argv, MCP injection, registry) gets its own pane id as `you` from
 //! `pane_list`. T4.2: a child calls `pane_report` and its parent gets the RESULT paste.
+// Uses Unix permissions and #!/bin/sh fakes.
+#![cfg(unix)]
 
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};

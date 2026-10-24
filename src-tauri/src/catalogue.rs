@@ -398,7 +398,7 @@ pub fn login_path() -> &'static str {
 fn login_shell() -> String {
     env::var("SHELL")
         .ok()
-        .filter(|s| s.starts_with('/'))
+        .filter(|s| Path::new(s).is_absolute())
         .unwrap_or_else(|| "/bin/zsh".into())
 }
 
@@ -520,17 +520,17 @@ fn base_command(program: impl AsRef<std::ffi::OsStr>, path: &str) -> Command {
     cmd
 }
 
-/// Jalur absolut `binary` pertama yang bisa dieksekusi di `path`. Entri relatif diabaikan.
+/// Jalur absolut `binary` pertama yang bisa dieksekusi di `path`. Entri relatif diabaikan. Pemisah `PATH` mengikuti
+/// platform (`:` di Unix, `;` di Windows); `PATHEXT` Windows belum dicoba (docs/PLATFORMS.md).
 pub fn find_in_path(binary: &str, path: &str) -> Option<PathBuf> {
-    path.split(':')
-        .filter(|dir| dir.starts_with('/'))
-        .map(|dir| Path::new(dir).join(binary))
+    env::split_paths(path)
+        .filter(|dir| dir.is_absolute())
+        .map(|dir| dir.join(binary))
         .find(|p| check_executable(p).is_ok())
 }
 
 /// Syarat path manual (SET-03): absolut, ada, berkas biasa (setelah symlink), dapat dieksekusi.
 pub fn check_executable(p: &Path) -> Result<(), String> {
-    use std::os::unix::fs::PermissionsExt;
     if !p.is_absolute() {
         return Err("path harus absolut".into());
     }
@@ -538,8 +538,13 @@ pub fn check_executable(p: &Path) -> Result<(), String> {
     if !meta.is_file() {
         return Err("bukan berkas".into());
     }
-    if meta.permissions().mode() & 0o111 == 0 {
-        return Err("tidak dapat dieksekusi".into());
+    // Windows tidak punya bit eksekusi; di sana berkas biasa sudah cukup.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if meta.permissions().mode() & 0o111 == 0 {
+            return Err("tidak dapat dieksekusi".into());
+        }
     }
     Ok(())
 }
@@ -740,7 +745,8 @@ fn set_path_in(dir: &Path, id: &str, path: Option<&str>) -> Result<(), String> {
         .map_err(|e| format!("Path manual tidak tersimpan: {e}"))
 }
 
-#[cfg(test)]
+// Uses Unix permissions, #!/bin/sh fakes and login shells.
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
 
