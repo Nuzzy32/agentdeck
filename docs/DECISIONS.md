@@ -679,6 +679,12 @@ halaman merek OpenAI menjawab 403 (hanya terbaca lewat cuplikan pencarian, belum
   agentdeck. Jadi `AgentMark`: glif Lucide netral (sparkles, bot, terminal) di petak berwarna token; nama agen di
   sebelahnya yang membedakan. Logo resmi hanya bila asetnya resmi dan lisensinya jelas.
 
+### Koreksi pemilik (2026-10-24)
+
+Pemilik meminta `AgentMark` untuk Claude Code dan Codex menampilkan mark resmi provider di dalam UI. Asset lokal di
+`src/assets/providers/` diambil dari aplikasi resmi yang terpasang; app icon agentdeck tetap terpisah dan tidak memakai
+logo provider. Shell dan agen katalog lain tetap memakai fallback Lucide.
+
 ## D-037 — Pasang agentdeck dengan satu perintah (`install.sh`) (2026-10-24)
 - Permintaan pemilik: memasang aplikasi lewat CLI seperti proyek lain (`curl … | sh`).
 - Belum ada rilis biner bertanda tangan (D-026, T5.2), jadi skrip membangun dari sumber: cek prasyarat (Xcode CLT,

@@ -788,7 +788,7 @@
   pointer-events: none;
 }
 
-/* Agent identity tile (D-036): neutral glyph, tinted square. */
+/* Built-in provider marks use the supplied app artwork; shell/unknown agents keep the neutral Lucide fallback. */
 .agent-mark {
   display: inline-grid;
   place-items: center;
@@ -796,6 +796,16 @@
   border-radius: 28%;
   background: var(--accent-soft);
   color: var(--accent);
+}
+.agent-mark-logo {
+  overflow: hidden;
+  background: transparent;
+}
+.agent-logo {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 .agent-mark-shell {
   background: var(--hover);

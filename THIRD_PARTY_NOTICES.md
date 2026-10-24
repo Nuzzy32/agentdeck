@@ -14,3 +14,10 @@ agentdeck includes material from the following projects. Their licenses apply to
     matching, regions) and of the working → idle hold in `src/pane/agent_detection.rs`. Changes are listed in the
     file's header.
 - Not from herdr: `src-tauri/detect-rules/*.toml` are agentdeck's own rules, added after herdr's at load time.
+
+## Provider marks (Claude Code and Codex)
+
+- `src/assets/providers/claude-code.png` is the Claude app mark copied from the installed official Claude app.
+- `src/assets/providers/codex.png` is the Codex app mark copied from the installed official ChatGPT app.
+- Claude, Claude Code, Codex, and the associated marks are trademarks of Anthropic PBC and OpenAI. The marks are used
+  only to identify the selected CLI provider; agentdeck is not affiliated with or endorsed by either provider.

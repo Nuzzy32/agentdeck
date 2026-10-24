@@ -5,20 +5,32 @@
 <h1 align="center">agentdeck</h1>
 
 <p align="center">
-  Workspace terminal lokal untuk menjalankan dan mengoordinasikan coding agent dari satu jendela.
+  Terminal desktop lokal untuk menjalankan dan mengoordinasikan coding agent dari satu workspace.
 </p>
 
 <p align="center">
   <strong>Claude Code · Codex · PTY · MCP lokal · Tauri</strong>
 </p>
 
-agentdeck menyatukan beberapa CLI coding agent dalam pane yang bisa dibagi, lalu memberi mereka jalur kerja sama yang terlihat dan dikendalikan pengguna. Satu agent dapat meminta agent lain membuka pane, mengirim tugas, membaca layar pane lain, dan mengembalikan hasil melalui server MCP lokal.
+<p align="center">
+  <a href="#about">About</a> ·
+  <a href="#mulai-cepat">Mulai cepat</a> ·
+  <a href="docs/ARCHITECTURE.md">Arsitektur</a> ·
+  <a href="#keamanan">Keamanan</a> ·
+  <a href="#kontribusi">Kontribusi</a>
+</p>
 
-Setiap agent tetap berjalan sebagai binary resmi milik providernya. agentdeck menyediakan terminal, lifecycle process, validasi kebijakan, antrean pesan, dan jembatan MCP tanpa mengambil alih login atau mengubah konfigurasi global agent.
+## About
 
-> **Status proyek:** tahap awal. MVP inti sudah berjalan di macOS (Apple Silicon); Phase 0–4 selesai, pengujian ulang alur Codex masih berlangsung. Belum ada rilis biner: build sendiri dari sumber. Notarization dan updater belum ada.
+agentdeck adalah terminal desktop untuk developer yang menjalankan lebih dari satu coding agent dalam pekerjaan yang sama. Claude Code, Codex, dan shell berjalan di pane yang bisa dibagi, sementara agentdeck menyediakan PTY, status, persetujuan, antrean pesan, dan jembatan MCP lokal agar agent dapat bekerja bersama secara terlihat.
 
-> agentdeck tidak berafiliasi dengan, atau didukung oleh, Anthropic maupun OpenAI. Claude Code dan Codex adalah merek milik pemiliknya masing-masing. Kamu memasang dan login sendiri ke CLI tersebut, dan agent yang saling memberi tugas memakai kuota paketmu sendiri.
+Tujuan utamanya sederhana: membuat alur **pembuat–peninjau** lebih cepat dilacak tanpa memindahkan konteks lewat banyak jendela terminal. Seorang agent dapat meminta agent lain dibuka, mengirim tugas, membaca layar pane lain, lalu menerima hasilnya kembali melalui jalur yang tetap dapat dikendalikan pengguna.
+
+Setiap agent tetap berjalan sebagai binary resmi milik providernya. agentdeck tidak mengambil alih login, tidak membaca kredensial, tidak memodifikasi binary provider, dan tidak menulis konfigurasi global Claude Code atau Codex.
+
+> **Status:** tahap awal, macOS Apple Silicon. Phase 0–4 sudah dibangun dan diuji secara lokal; pengujian ulang beberapa alur Codex masih berlangsung. Belum ada rilis biner bertanda tangan, notarization, atau updater.
+
+agentdeck tidak berafiliasi dengan atau didukung oleh Anthropic maupun OpenAI. Claude Code dan Codex adalah merek milik pemiliknya masing-masing; pengguna memasang dan login sendiri ke CLI tersebut.
 
 ## Mengapa agentdeck
 
@@ -50,7 +62,7 @@ Workflow review antar agent biasanya memerlukan beberapa jendela terminal dan co
 
 Core Rust menjalankan setiap CLI langsung di PTY dan meneruskan output ke xterm.js. Agent memanggil tool agentdeck melalui HTTP MCP pada `127.0.0.1` menggunakan token unik per pane. Saat pesan siap dikirim, agentdeck menempelkannya ke PTY tujuan seperti input pengguna, kemudian mencatat statusnya di log.
 
-## Batas keamanan
+## Keamanan
 
 Keamanan berada di core Rust dan diterapkan pada setiap permintaan MCP:
 

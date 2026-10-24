@@ -1,3 +1,6 @@
+import claudeCodeLogo from "../assets/providers/claude-code.png";
+import codexLogo from "../assets/providers/codex.png";
+
 // Icon paths from Lucide (https://lucide.dev), ISC License, Copyright (c) Lucide Contributors.
 const PATHS = {
   plus: <path d="M5 12h14m-7-7v14" />,
@@ -135,21 +138,24 @@ export function IconButton({
 }
 
 const AGENT_ICON: Record<string, IconName> = { "claude-code": "sparkles", codex: "bot" };
+const AGENT_LOGO: Record<string, string> = { "claude-code": claudeCodeLogo, codex: codexLogo };
 
 /** Glyph for a catalogue agent id; shells and unknown agents get the terminal prompt. */
 export function agentIcon(id: string | null): IconName {
   return (id && AGENT_ICON[id]) || "terminal";
 }
 
-/**
- * Agent identity tile: a neutral glyph on a tinted square. No provider logos (DECISIONS D-036); the tile tells agents
- * from shells, the name next to it tells agents apart.
- */
+/** Agent identity tile: use the provider mark for built-in agents and Lucide for shells/unknown agents. */
 export function AgentMark({ id, size = 16 }: { id: string | null; size?: number }) {
   const shell = id === null || id === "shell";
+  const logo = id ? AGENT_LOGO[id] : undefined;
   return (
-    <span className={`agent-mark${shell ? " agent-mark-shell" : ""}`} style={{ width: size, height: size }} aria-hidden="true">
-      <Icon name={agentIcon(id)} size={Math.round(size * 0.66)} />
+    <span
+      className={`agent-mark${shell ? " agent-mark-shell" : ""}${logo ? " agent-mark-logo" : ""}`}
+      style={{ width: size, height: size }}
+      aria-hidden="true"
+    >
+      {logo ? <img className="agent-logo" src={logo} alt="" /> : <Icon name={agentIcon(id)} size={Math.round(size * 0.66)} />}
     </span>
   );
 }
